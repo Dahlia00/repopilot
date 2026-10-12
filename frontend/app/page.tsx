@@ -1,13 +1,27 @@
 'use client';
 import { useState, type FormEvent } from 'react';
-type Finding = {
-  severity: 'HIGH' | 'MEDIUM' | 'LOW';
-  category: string;
-  title: string;
-  explanation: string;
-  suggested_fix: string;
+import Link from 'next/link';
+type ChangedFile = {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  patch: string | null;
 };
-type Analysis = { repository: string; pull_request: number; findings: Finding[] };
+type Analysis = {
+  repository: string;
+  pull_request: number;
+  title: string;
+  state: 'open' | 'closed';
+  author: string;
+  base_branch: string;
+  head_branch: string;
+  changed_files: number;
+  additions: number;
+  deletions: number;
+  files: ChangedFile[];
+  files_truncated: boolean;
+};
 const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export default function Home() {
@@ -22,7 +36,8 @@ export default function Home() {
     setAnalysis(null);
     const number = Number(pullRequest);
     if (
-      !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository.trim()) ||
+      !/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+$/.test(repository.trim()) ||
+      ['.', '..'].includes(repository.trim().split('/')[1]) ||
       !Number.isSafeInteger(number) ||
       number < 1
     ) {
@@ -37,14 +52,18 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repository: repository.trim(), pull_request: number }),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(60000),
       });
-      if (!response.ok)
+      if (!response.ok) {
+        const body: { detail?: unknown } = await response.json().catch(() => ({}));
         throw new Error(
-          response.status === 422
-            ? 'The repository or pull request number is invalid.'
-            : `Analysis failed (HTTP ${response.status}). Please try again.`,
+          typeof body.detail === 'string'
+            ? body.detail
+            : response.status === 422
+              ? 'Enter a valid owner/repo and a positive whole pull request number.'
+              : `GitHub lookup failed (HTTP ${response.status}). Please try again.`,
         );
+      }
       setAnalysis((await response.json()) as Analysis);
     } catch (err) {
       setError(
@@ -63,9 +82,9 @@ export default function Home() {
   return (
     <div className="shell">
       <header>
-        <a className="brand" href="/">
+        <Link className="brand" href="/">
           <span className="logo">↗</span>RepoPilot
-        </a>
+        </Link>
         <span className="mode">
           ● <span>Local preview</span>
         </span>
@@ -75,17 +94,15 @@ export default function Home() {
           <p className="eyebrow">YOUR CODE. A CLEARER PERSPECTIVE.</p>
           <h1>RepoPilot</h1>
           <p className="subtitle">AI-powered code review and debugging assistant</p>
-          <p className="muted">
-            Bring your pull request into focus with clear, actionable findings.
-          </p>
+          <p className="muted">Explore real GitHub pull request details and changed files.</p>
         </section>
         <section className="panel" aria-labelledby="review-title">
           <div className="section-heading">
             <div>
-              <h2 id="review-title">Review a pull request</h2>
+              <h2 id="review-title">Inspect a pull request</h2>
               <p className="muted">Enter a repository and pull request number to get started.</p>
             </div>
-            <span className="tag">MOCK DATA</span>
+            <span className="tag">GITHUB API</span>
           </div>
           <form onSubmit={analyze}>
             <div className="fields">
@@ -121,10 +138,10 @@ export default function Home() {
               </div>
             </div>
             <div className="form-footer">
-              <p>Demo mode · No repository code is accessed.</p>
+              <p>Live GitHub data · No AI analysis is performed.</p>
               <button disabled={loading} type="submit">
                 {loading && <span className="spinner" aria-hidden="true" />}
-                {loading ? 'Analyzing…' : 'Analyze Pull Request'}
+                {loading ? 'Fetching…' : 'Fetch Pull Request'}
                 {!loading && <span aria-hidden="true">↗</span>}
               </button>
             </div>
@@ -135,37 +152,78 @@ export default function Home() {
             </p>
           )}
         </section>
-        <section className="results" aria-labelledby="findings-title" aria-busy={loading}>
+        <section className="results" aria-labelledby="pr-title" aria-busy={loading}>
           <div className="section-heading">
-            <h2 id="findings-title">Review findings</h2>
+            <h2 id="pr-title">Pull request details</h2>
             <span className="muted small">
-              {analysis ? `${analysis.findings.length} findings` : 'Awaiting analysis'}
+              {analysis ? 'Retrieved from GitHub' : 'Awaiting pull request'}
             </span>
           </div>
           <div role="status" aria-live="polite">
-            {loading && <p className="empty muted">Preparing mock review findings…</p>}
+            {loading && (
+              <p className="empty muted">Fetching pull request details and changed files…</p>
+            )}
           </div>
           {analysis ? (
             <>
-              <p className="muted context">
-                {analysis.repository} / PR #{analysis.pull_request} · Mock findings
-              </p>
-              <div className="finding-list">
-                {analysis.findings.map((f) => (
-                  <article className="finding" key={f.severity}>
-                    <div className="finding-meta">
-                      <span className={`severity ${f.severity.toLowerCase()}`}>{f.severity}</span>
-                      <span>{f.category}</span>
-                    </div>
-                    <h3>{f.title}</h3>
-                    <p>{f.explanation}</p>
-                    <div className="fix">
-                      <span>SUGGESTED FIX</span>
-                      <p>{f.suggested_fix}</p>
-                    </div>
-                  </article>
+              <article className="pr-overview">
+                <p className="muted context">
+                  {analysis.repository} / PR #{analysis.pull_request}
+                </p>
+                <h3>{analysis.title}</h3>
+                <div className="pr-meta">
+                  <span className={`pr-state ${analysis.state}`}>{analysis.state}</span>
+                  <span>
+                    Opened by <strong>{analysis.author}</strong>
+                  </span>
+                </div>
+                <p className="branches">
+                  <code>{analysis.head_branch}</code>
+                  <span aria-label="into"> → </span>
+                  <code>{analysis.base_branch}</code>
+                </p>
+                <div className="pr-stats">
+                  <span>
+                    <strong>{analysis.changed_files}</strong> changed files
+                  </span>
+                  <span className="additions">+{analysis.additions} additions</span>
+                  <span className="deletions">−{analysis.deletions} deletions</span>
+                </div>
+              </article>
+              <h3 className="files-heading">Changed files</h3>
+              {analysis.files_truncated && (
+                <p className="notice">
+                  Showing {analysis.files.length} of {analysis.changed_files} files. GitHub returns
+                  at most 3,000 files; the PR may also have changed during retrieval.
+                </p>
+              )}
+              <div className="file-list">
+                {analysis.files.map((file) => (
+                  <details className="changed-file" key={file.filename}>
+                    <summary>
+                      <span className="file-name">{file.filename}</span>
+                      <span className="file-meta">
+                        <span>{file.status}</span>
+                        <span className="additions">+{file.additions}</span>
+                        <span className="deletions">−{file.deletions}</span>
+                      </span>
+                    </summary>
+                    {file.patch != null ? (
+                      <pre className="diff">
+                        <code>{file.patch}</code>
+                      </pre>
+                    ) : (
+                      <p className="patch-missing">
+                        GitHub did not provide a patch for this file. Binary files and some large
+                        diffs may not include one.
+                      </p>
+                    )}
+                  </details>
                 ))}
               </div>
+              {analysis.files.length === 0 && (
+                <p className="empty muted">No changed files were returned for this pull request.</p>
+              )}
             </>
           ) : (
             !loading && (
@@ -173,15 +231,17 @@ export default function Home() {
                 <span className="empty-icon" aria-hidden="true">
                   ⌘
                 </span>
-                <h3>A fresh perspective on your next PR</h3>
-                <p className="muted">Your findings will appear here after you run an analysis.</p>
-                <p className="hint">Security · Bugs · Code quality</p>
+                <h3>Your pull request, at a glance</h3>
+                <p className="muted">
+                  Fetch a pull request to explore its branches, changed files, and diffs.
+                </p>
+                <p className="hint">Real GitHub data · Read-only · No AI review</p>
               </div>
             )
           )}
         </section>
         <footer>
-          RepoPilot <span>Milestone 01 · Local foundation</span>
+          RepoPilot <span>Milestone 02 · GitHub integration</span>
         </footer>
       </main>
     </div>
