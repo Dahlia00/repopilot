@@ -1,6 +1,7 @@
 'use client';
 import { useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import ReviewFindings, { type Finding } from './review-findings';
 type ChangedFile = {
   filename: string;
   status: string;
@@ -22,6 +23,12 @@ type Analysis = {
   files: ChangedFile[];
   files_truncated: boolean;
 };
+type Review = Analysis & {
+  findings: Finding[];
+  reviewed_files: string[];
+  skipped_files: string[];
+  model: string;
+};
 const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export default function Home() {
@@ -30,10 +37,21 @@ export default function Home() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [review, setReview] = useState<Review | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewError, setReviewError] = useState('');
+  const busy = loading || reviewing;
+
+  function clearResults() {
+    setAnalysis(null);
+    setReview(null);
+    setError('');
+    setReviewError('');
+  }
+
   async function analyze(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError('');
-    setAnalysis(null);
+    clearResults();
     const number = Number(pullRequest);
     if (
       !/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+$/.test(repository.trim()) ||
@@ -79,6 +97,47 @@ export default function Home() {
       setLoading(false);
     }
   }
+  async function analyzeWithAI() {
+    if (!analysis || busy) return;
+    setReview(null);
+    setReviewError('');
+    setReviewing(true);
+    try {
+      const response = await fetch(`${apiUrl.replace(/\/$/, '')}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repository: analysis.repository,
+          pull_request: analysis.pull_request,
+        }),
+        signal: AbortSignal.timeout(360000),
+      });
+      if (!response.ok) {
+        const body: { detail?: unknown } = await response.json().catch(() => ({}));
+        throw new Error(
+          typeof body.detail === 'string'
+            ? body.detail
+            : `AI review failed (HTTP ${response.status}). Please try again.`,
+        );
+      }
+      const result = (await response.json()) as Review;
+      setAnalysis(result);
+      setReview(result);
+    } catch (err) {
+      setReviewError(
+        err instanceof TypeError
+          ? 'Could not connect to RepoPilot API. Check that the backend is running.'
+          : err instanceof Error && ['TimeoutError', 'AbortError'].includes(err.name)
+            ? 'AI review timed out. Please try again.'
+            : err instanceof Error
+              ? err.message
+              : 'AI review failed. Please try again.',
+      );
+    } finally {
+      setReviewing(false);
+    }
+  }
+
   return (
     <div className="shell">
       <header>
@@ -94,7 +153,9 @@ export default function Home() {
           <p className="eyebrow">YOUR CODE. A CLEARER PERSPECTIVE.</p>
           <h1>RepoPilot</h1>
           <p className="subtitle">AI-powered code review and debugging assistant</p>
-          <p className="muted">Explore real GitHub pull request details and changed files.</p>
+          <p className="muted">
+            Explore pull request changes and get actionable AI code review findings.
+          </p>
         </section>
         <section className="panel" aria-labelledby="review-title">
           <div className="section-heading">
@@ -112,9 +173,12 @@ export default function Home() {
                   id="repository"
                   placeholder="owner/repository"
                   value={repository}
-                  onChange={(e) => setRepository(e.target.value)}
+                  onChange={(e) => {
+                    setRepository(e.target.value);
+                    clearResults();
+                  }}
                   required
-                  disabled={loading}
+                  disabled={busy}
                   autoComplete="off"
                   spellCheck={false}
                   maxLength={200}
@@ -130,20 +194,28 @@ export default function Home() {
                   step="1"
                   placeholder="1"
                   value={pullRequest}
-                  onChange={(e) => setPullRequest(e.target.value)}
+                  onChange={(e) => {
+                    setPullRequest(e.target.value);
+                    clearResults();
+                  }}
                   required
-                  disabled={loading}
+                  disabled={busy}
                 />
                 <p className="hint">The number shown on GitHub.</p>
               </div>
             </div>
             <div className="form-footer">
-              <p>Live GitHub data · No AI analysis is performed.</p>
-              <button disabled={loading} type="submit">
-                {loading && <span className="spinner" aria-hidden="true" />}
-                {loading ? 'Fetching…' : 'Fetch Pull Request'}
-                {!loading && <span aria-hidden="true">↗</span>}
-              </button>
+              <p>Fetch changes, then choose AI review to send patches to OpenAI.</p>
+              <div className="actions">
+                <button className="secondary-button" disabled={busy} type="submit">
+                  {loading && <span className="spinner" aria-hidden="true" />}
+                  {loading ? 'Fetching…' : 'Fetch Pull Request'}
+                </button>
+                <button disabled={!analysis || busy} type="button" onClick={analyzeWithAI}>
+                  {reviewing && <span className="spinner" aria-hidden="true" />}
+                  {reviewing ? 'Reviewing…' : 'Analyze with AI'}
+                </button>
+              </div>
             </div>
           </form>
           {error && (
@@ -152,7 +224,7 @@ export default function Home() {
             </p>
           )}
         </section>
-        <section className="results" aria-labelledby="pr-title" aria-busy={loading}>
+        <section className="results" aria-labelledby="pr-title" aria-busy={busy}>
           <div className="section-heading">
             <h2 id="pr-title">Pull request details</h2>
             <span className="muted small">
@@ -235,13 +307,32 @@ export default function Home() {
                 <p className="muted">
                   Fetch a pull request to explore its branches, changed files, and diffs.
                 </p>
-                <p className="hint">Real GitHub data · Read-only · No AI review</p>
+                <p className="hint">Real GitHub data · Read-only AI review</p>
               </div>
             )
           )}
         </section>
+        <div role="status" aria-live="polite">
+          {reviewing && (
+            <p className="empty muted">
+              Reviewing changed code with AI… Larger pull requests may take a few minutes.
+            </p>
+          )}
+        </div>
+        {reviewError && (
+          <p className="error" role="alert">
+            {reviewError}
+          </p>
+        )}
+        {review && (
+          <ReviewFindings
+            findings={review.findings}
+            reviewedFiles={review.reviewed_files}
+            skippedFiles={review.skipped_files}
+          />
+        )}
         <footer>
-          RepoPilot <span>Milestone 02 · GitHub integration</span>
+          RepoPilot <span>Milestone 03 · AI code review</span>
         </footer>
       </main>
     </div>

@@ -430,3 +430,120 @@ footer {
   border: 1px solid var(--border);
   border-radius: 6px;
 }
+
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.secondary-button {
+  color: var(--accent);
+  background: #a7b8ff10;
+  border: 1px solid #39435a;
+}
+.secondary-button:hover {
+  background: #a7b8ff20;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+.ai-results {
+  margin-top: 36px;
+}
+.severity-summary {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 18px 0;
+}
+.severity {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 6px 9px;
+  border-radius: 4px;
+}
+.critical {
+  color: #ffadbb;
+  background: #c72c5129;
+  border: 1px solid #c72c5155;
+}
+.high {
+  color: #ff94a0;
+  background: #ff6b7a16;
+}
+.medium {
+  color: #ebc57a;
+  background: #efc76816;
+}
+.low {
+  color: #96bfff;
+  background: #84b7ff16;
+}
+.finding-list {
+  display: grid;
+  gap: 14px;
+}
+.finding {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+}
+.finding-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+.confidence {
+  margin-left: auto;
+}
+.finding h3 {
+  margin: 16px 0 10px;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+.finding p {
+  font-size: 13px;
+  color: #aab6c9;
+  line-height: 1.7;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.finding .finding-location {
+  margin-top: 16px;
+  color: var(--accent);
+  font-size: 11px;
+}
+.fix {
+  border-left: 2px solid #5c709b;
+  padding-left: 14px;
+  margin-top: 20px;
+}
+.fix > span {
+  font-size: 9px;
+  color: var(--accent);
+  letter-spacing: 1px;
+}
+.fix p {
+  margin-top: 6px;
+}
+.notice {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .actions {
+    flex-direction: column;
+  }
+  .confidence {
+    margin-left: 0;
+  }
+  .finding {
+    padding: 20px;
+  }
+}
