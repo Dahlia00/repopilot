@@ -29,7 +29,8 @@ export default function ReviewFindings({
         </span>
       </div>
       <p className="muted small">
-        {reviewedFiles.length} files reviewed · Review covers the returned patches only.
+        {reviewedFiles.length} files reviewed · Full changed files reviewed with selected repository
+        context.
       </p>
       <div className="severity-summary" aria-label="Finding counts by severity">
         {severities.map((severity) => (
@@ -40,7 +41,7 @@ export default function ReviewFindings({
       </div>
       {skippedFiles.length > 0 && (
         <div className="notice">
-          <p>Skipped {skippedFiles.length} files because GitHub did not provide patches:</p>
+          <p>Skipped {skippedFiles.length} files; see repository context below for reasons:</p>
           <ul>
             {skippedFiles.map((file) => (
               <li key={file}>
@@ -53,8 +54,8 @@ export default function ReviewFindings({
       {findings.length === 0 ? (
         <p className="empty muted">
           {reviewedFiles.length === 0
-            ? 'No patches were available for AI review.'
-            : 'The AI reported no actionable findings in the reviewed patches.'}
+            ? 'No changed files could be reviewed within the available content and limits.'
+            : 'The AI reported no actionable findings in the reviewed changes.'}
         </p>
       ) : (
         <div className="finding-list">

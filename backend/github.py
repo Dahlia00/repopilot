@@ -26,6 +26,8 @@ class PullRequestResponse(BaseModel):
     author: str
     base_branch: str
     head_branch: str
+    head_sha: str = Field(pattern=r'^[0-9a-f]{40}$')
+    head_repository: str = Field(pattern=r'^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+$', max_length=200)
     changed_files: int = Field(ge=0)
     additions: int = Field(ge=0)
     deletions: int = Field(ge=0)
@@ -49,9 +51,23 @@ async def get_github_client() -> AsyncIterator[httpx.AsyncClient]:
         yield client
 
 
-async def github_json(client: httpx.AsyncClient, path: str, **kwargs) -> tuple[object, httpx.Response]:
+async def github_json(client: httpx.AsyncClient, path: str, *, max_response_bytes: int | None = None, **kwargs) -> tuple[object, httpx.Response]:
     try:
-        response = await client.get(path, **kwargs)
+        if max_response_bytes is None:
+            response = await client.get(path, **kwargs)
+        else:
+            async with client.stream('GET', path, **kwargs) as stream:
+                chunks = bytearray()
+                async for chunk in stream.aiter_bytes():
+                    if len(chunks) + len(chunk) > max_response_bytes:
+                        raise HTTPException(413, 'GitHub response exceeds the repository context size limit.')
+                    chunks.extend(chunk)
+                # aiter_bytes() has already decompressed the stream. Avoid decoding twice.
+                headers = httpx.Headers(stream.headers)
+                headers.pop('content-encoding', None)
+                headers.pop('content-length', None)
+                response = httpx.Response(stream.status_code, headers=headers,
+                                          content=bytes(chunks), request=stream.request)
     except httpx.TimeoutException as exc:
         raise HTTPException(504, 'GitHub did not respond in time. Please try again.') from exc
     except httpx.RequestError as exc:
@@ -126,6 +142,8 @@ async def fetch_pull_request(client: httpx.AsyncClient, repository: str, number:
             title=metadata['title'], state=metadata['state'],
             author=metadata['user']['login'],
             base_branch=metadata['base']['ref'], head_branch=metadata['head']['ref'],
+            head_sha=metadata['head']['sha'],
+            head_repository=(metadata['head'].get('repo') or {}).get('full_name', repository),
             changed_files=metadata['changed_files'], additions=metadata['additions'],
             deletions=metadata['deletions'], files=files,
             files_truncated=len(files) < metadata['changed_files'],

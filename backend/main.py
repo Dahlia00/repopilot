@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from github import PullRequestResponse, fetch_pull_request, get_github_client
 from review import ReviewResponse, get_openai_client, review_patches
+from context import build_repository_context
 
 
 class AnalyzeRequest(BaseModel):
@@ -63,6 +64,10 @@ async def review(
 ) -> ReviewResponse:
     pr = await analyze(request, client)
     try:
-        return await asyncio.wait_for(review_patches(pr, ai_client), timeout=300)
+        repository = await asyncio.wait_for(build_repository_context(pr, client), timeout=45)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(504, 'GitHub repository context retrieval timed out. Please try again.') from exc
+    try:
+        return await asyncio.wait_for(review_patches(pr, ai_client, repository), timeout=300)
     except asyncio.TimeoutError as exc:
         raise HTTPException(504, 'AI review exceeded the five-minute time limit. No partial review is returned.') from exc

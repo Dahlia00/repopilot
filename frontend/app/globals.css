@@ -547,3 +547,43 @@ button:disabled {
     padding: 20px;
   }
 }
+
+.repository-context {
+  margin-top: 28px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+  background: var(--panel);
+}
+.context-list {
+  padding: 0;
+  margin: 18px 0 0;
+  list-style: none;
+  display: grid;
+  gap: 14px;
+}
+.context-list code {
+  font-size: 12px;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+.context-list p {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 6px 0 0;
+  line-height: 1.6;
+}
+.context-skipped {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 20px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.context-skipped summary {
+  cursor: pointer;
+}
+.context-skipped summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}

@@ -1,5 +1,6 @@
 """Offline review tests exercise the real SDK with mocked HTTP responses."""
 import asyncio
+import base64
 import json
 import os
 import unittest
@@ -11,7 +12,7 @@ from openai import AsyncOpenAI
 
 from github import get_github_client
 from main import app
-from review import MAX_FINDINGS_PER_FILE, MODEL, get_openai_client, visible_new_lines
+from review import MAX_FINDINGS_PER_FILE, MODEL, SCHEMA_CHAR_ALLOWANCE, get_openai_client, visible_new_lines
 
 PR_PATH = '/repos/Dahlia00/repopilot/pulls/1'
 FILES = [
@@ -23,7 +24,7 @@ FILES = [
 ]
 METADATA = {
     'title': 'Review test', 'state': 'open', 'user': {'login': 'Dahlia00'},
-    'base': {'ref': 'main'}, 'head': {'ref': 'test-pr'},
+    'base': {'ref': 'main'}, 'head': {'ref': 'test-pr', 'sha': 'a' * 40, 'repo': {'full_name': 'Dahlia00/repopilot'}},
     'changed_files': 3, 'additions': 2, 'deletions': 1,
 }
 FINDING = {
@@ -48,6 +49,7 @@ class ReviewEndpointTests(unittest.TestCase):
         self.github_requests = []
         self.ai_requests = []
         self.files = FILES
+        self.full_sources = {}
         self.github_error = None
         self.ai_handler = self.success
 
@@ -59,6 +61,20 @@ class ReviewEndpointTests(unittest.TestCase):
                 return httpx.Response(200, json=METADATA)
             if request.url.path == PR_PATH + '/files':
                 return httpx.Response(200, json=self.files)
+            sources = {'README.md': '# Test project\n'}
+            for file in self.files:
+                count = max(visible_new_lines(file.get('patch') or ''), default=2)
+                sources[file['filename']] = self.full_sources.get(file['filename'], '\n'.join(['# Full source context'] * count) + '\n')
+            entries = [{'path': name, 'sha': f'{index + 1:040x}', 'size': len(content.encode()),
+                        'type': 'blob', 'mode': '100644'}
+                       for index, (name, content) in enumerate(sources.items())]
+            if '/git/trees/' in request.url.path:
+                return httpx.Response(200, json={'tree': entries, 'truncated': False})
+            if '/git/blobs/' in request.url.path:
+                entry = next(item for item in entries if item['sha'] == request.url.path.rsplit('/', 1)[1])
+                content = sources[entry['path']].encode()
+                return httpx.Response(200, json={'encoding': 'base64', 'size': len(content),
+                                                 'content': base64.b64encode(content).decode()})
             return httpx.Response(404, json={})
 
         def ai_transport(request):
@@ -102,6 +118,9 @@ class ReviewEndpointTests(unittest.TestCase):
             payload = json.loads(body['input'])
             self.assertEqual(payload['file'], file['filename'])
             self.assertEqual(payload['patch'], file['patch'])
+            self.assertIn('# Full source context', payload['full_changed_file']['content'])
+            self.assertEqual(payload['repository_context'][0]['path'], 'README.md')
+            self.assertEqual(payload['repository_context'][0]['content'], '# Test project\n')
             self.assertFalse(body['store'])
             self.assertNotIn('tools', body)
             schema = body['text']['format']
@@ -166,6 +185,74 @@ class ReviewEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertIn('OPENAI_API_KEY', response.json()['detail'])
         self.assertEqual(self.github_requests, [])
+        self.assertEqual(self.ai_requests, [])
+
+    def test_used_context_metadata_and_schema_budget(self):
+        response = self.review()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['repository_context'], [{
+            'path': 'README.md', 'reason': 'Root README: project purpose and conventions',
+            'used_for': ['sample.py', 'second.py'],
+        }])
+        measured = 0
+        for request in self.ai_requests:
+            body = json.loads(request.content)
+            measured += len(body['instructions']) + len(body['input']) + len(json.dumps(body['text']['format'], ensure_ascii=False))
+        self.assertGreaterEqual(response.json()['input_characters'], measured)
+
+    def test_model_input_limit_skips_without_patch_only_fallback(self):
+        with patch('review.MAX_MODEL_INPUT_CHARS', 1):
+            response = self.review()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['reviewed_files'], [])
+        self.assertEqual(response.json()['repository_context'], [])
+        self.assertEqual(self.ai_requests, [])
+        self.assertIn('Model input character limit', response.json()['skipped_file_details'][0]['reason'])
+
+    def test_context_omitted_from_payload_is_not_reported_as_used(self):
+        self.files = [FILES[0]]
+        self.review()
+        body = json.loads(self.ai_requests[0].content)
+        payload = json.loads(body['input'])
+        payload['repository_context'] = []
+        budget = len(body['instructions']) + len(json.dumps(payload, ensure_ascii=False)) + SCHEMA_CHAR_ALLOWANCE
+        self.ai_requests.clear()
+        with patch('review.MAX_MODEL_INPUT_CHARS', budget):
+            response = self.review()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['reviewed_files'], ['sample.py'])
+        self.assertEqual(response.json()['repository_context'], [])
+        self.assertTrue(response.json()['context_warnings'])
+        self.assertEqual(json.loads(json.loads(self.ai_requests[0].content)['input'])['repository_context'], [])
+
+    def test_cumulative_model_input_limit(self):
+        self.review()
+        body = json.loads(self.ai_requests[0].content)
+        budget = len(body['instructions']) + len(body['input']) + SCHEMA_CHAR_ALLOWANCE
+        self.ai_requests.clear()
+        with patch('review.MAX_TOTAL_MODEL_INPUT_CHARS', budget):
+            response = self.review()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['reviewed_files'], ['sample.py'])
+        self.assertIn('second.py', response.json()['skipped_files'])
+        self.assertLessEqual(response.json()['input_characters'], budget)
+        self.assertEqual(len(self.ai_requests), 1)
+
+    def test_full_file_line_outside_diff_is_valid_for_pr_related_finding(self):
+        self.files = [FILES[0]]
+        self.full_sources['sample.py'] = '# Context\n' * 5
+        self.ai_handler = lambda request: model_response([{**FINDING, 'line': 5}])
+        response = self.review()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['findings'][0]['line'], 5)
+
+    def test_context_timeout_does_not_call_model(self):
+        async def timed_out(pr, client):
+            raise asyncio.TimeoutError()
+        with patch('main.build_repository_context', timed_out):
+            response = self.review()
+        self.assertEqual(response.status_code, 504)
+        self.assertIn('context retrieval', response.json()['detail'])
         self.assertEqual(self.ai_requests, [])
 
     def test_invalid_input(self):
@@ -264,7 +351,7 @@ class ReviewEndpointTests(unittest.TestCase):
         self.assertNotIn('findings', response.json())
 
     def test_overall_review_timeout(self):
-        async def timed_out(pr, client):
+        async def timed_out(pr, client, repository):
             raise asyncio.TimeoutError()
         with patch('main.review_patches', timed_out):
             response = self.review()

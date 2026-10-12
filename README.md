@@ -1,8 +1,8 @@
 # RepoPilot
 
-AI-powered code review and debugging assistant — milestone 3: AI code review.
+AI-powered code review and debugging assistant — milestone 4: repository understanding.
 
-RepoPilot fetches real GitHub PR metadata and changed files, displays expandable patches, and optionally analyzes those patches with OpenAI. Public GitHub repositories work without a GitHub token. AI review requires a backend OPENAI_API_KEY. This milestone only reads and analyzes: it does not modify files or the PR, post GitHub comments, or include agents, a database, or Docker.
+RepoPilot fetches real GitHub PR metadata and changed files, displays expandable patches, and reviews full changed files with selected repository context through OpenAI. Public GitHub repositories work without a GitHub token. AI review requires a backend OPENAI_API_KEY. This milestone only reads and analyzes: it does not modify files or the PR, post GitHub comments, or include agents, a database, or Docker.
 
 ## Requirements
 
@@ -45,8 +45,9 @@ Open http://localhost:3000.
 4. Click **Fetch Pull Request**.
 5. Confirm the live PR title, number, author, open/closed state, source → target branches, changed file count, additions, and deletions appear.
 6. Expand each changed file to see GitHub's patch. If GitHub omitted a patch, the UI says so.
-7. Click **Analyze with AI**. This sends the returned filenames and patches to OpenAI and re-fetches the PR so the displayed diffs match the reviewed data.
+7. Click **Analyze with AI**. This re-fetches the PR, reads full changed files at its head commit, selects repository context, and sends bounded review inputs to OpenAI.
 8. Wait for findings with severity, category, file/line, title, explanation, suggested fix, confidence, and summary counts.
+9. Check **Repository context** below the findings: it shows the head commit, number of context files actually used, their paths, selection reasons, coverage notes, and skipped changed-file reasons. For PR #1, expect the root `README.md` as context; the sample currently has no local imports.
 
 For the intentionally unsafe `samples/insecure_example.py`, inspect whether the model reports SQL injection in `get_user()` and unsafe empty-list indexing in `first_result()`. These are expected review targets, not hardcoded findings or guaranteed outputs. Model results may vary. If the PR changes, the reviewed code also changes.
 
@@ -88,15 +89,69 @@ Without this variable, **Fetch Pull Request** still works. **Analyze with AI** r
 ## How AI review works
 
 - `/analyze` remains a GitHub-only retrieval endpoint.
-- `/review` retrieves the real PR and delegates to the separate `backend/review.py` service.
-- Every returned file with a patch is sent, with its filename and complete returned patch, in a separate request through the official `AsyncOpenAI` Python SDK. Files without patches are explicitly listed in `skipped_files`.
+- `/review` retrieves the real PR, builds a bounded snapshot through `backend/context.py`, and delegates AI analysis to `backend/review.py`.
+- Each reviewable changed file is sent with its filename, patch, **full head-commit content**, and selected repository context in a separate official `AsyncOpenAI` SDK request. A file is never reviewed using only its patch if full content is unavailable. Removed, unsupported, oversized, or over-budget files are explicitly skipped; reasons are returned.
 - The fixed model is `gpt-4.1-mini-2025-04-14`. Instructions require reviewing every changed line, hunk, and function for bugs, security vulnerabilities, edge cases, error handling, performance, and code quality, including assumptions about collections, null/empty values, indexing, and input validation. The model must continue after finding a prominent issue and return independent root causes as separate findings, up to **10 findings per changed file**, without padding the count. No tools or agents are used. Patches are treated as untrusted content, not instructions.
-- The Responses API uses a strict Pydantic structured-output schema. The backend validates severity/category, confidence from 0–100, file identity, and line numbers against the new-file lines in the diff. Unknown locations use `line: null`. See [official OpenAI Structured Outputs guidance](https://developers.openai.com/api/docs/guides/structured-outputs) and the [model documentation](https://developers.openai.com/api/docs/models/gpt-4.1-mini).
+- The Responses API uses a strict Pydantic structured-output schema. The backend validates severity/category, confidence from 0–100, file identity, and line numbers against the full changed file. The prompt prefers changed-line locations and requires explaining any PR connection for affected surrounding code. Unknown locations use `line: null`. See [official OpenAI Structured Outputs guidance](https://developers.openai.com/api/docs/guides/structured-outputs) and the [model documentation](https://developers.openai.com/api/docs/models/gpt-4.1-mini).
 - Results are sorted by severity. Empty findings are valid; no findings are synthesized or substituted when a review fails. The response includes `reviewed_files`, `skipped_files`, and `model` alongside PR information and `findings`.
-- Reviews use returned patches only, not the whole repository. Missing or partial GitHub patches limit coverage. Check recommendations before acting on them. AI requests consume your OpenAI API quota; clicking AI review again makes new requests.
-- OpenAI requests set `store=False`, use a 60-second HTTP timeout, disable automatic retries, and limit output to 6,000 tokens per file. The AI phase has a five-minute overall limit after GitHub retrieval. Failures return an error rather than a partial review. The frontend waits up to six minutes.
+- The prompt distinguishes PR changes from surrounding source and repository context, using context for imports, function calls, data flow, and assumptions. It rejects unrelated pre-existing issues. Missing patches or excluded full files limit coverage. Check recommendations before acting on them. AI requests consume your OpenAI API quota; clicking AI review again makes new requests.
+- OpenAI requests set `store=False`, use a 60-second HTTP timeout, disable automatic retries, and limit output to 6,000 tokens per file. PR retrieval and context retrieval each have a 45-second overall limit; the AI phase then has a five-minute limit. Provider failures return errors rather than partial findings. The frontend waits up to seven minutes.
 
 Each finding includes `severity` (CRITICAL/HIGH/MEDIUM/LOW), `category` (Security/Bug/Performance/Error Handling/Code Quality), `file`, nullable `line`, `title`, `explanation`, `suggested_fix`, and `confidence` (0–100). All findings come from the model response; offline tests use mock API responses solely to verify the integration.
+
+## Repository context selection
+
+All full file contents and context come from the **PR head repository and immutable head commit SHA**, including fork PRs. The backend requests a bounded Git tree index (metadata, not an archive or clone), then reads only selected Git blobs. If a changed file is absent from a truncated tree index, it tries the Contents API with `ref=head_sha`. API URLs stay on GitHub; blob IDs and file paths are validated. There is no recursive dependency crawl and no repository write.
+
+Selection is deterministic, in this priority order:
+
+1. Root `README.md`, matched case-insensitively, for project purpose and conventions.
+2. Direct local imports discovered in the **full changed file**, including imports outside the diff. Python uses AST parsing for `import` and `from`, resolves relative imports and package `__init__.py`, and checks the changed-file directory, repository root, and `src`. JavaScript/TypeScript tokenizes strings/comments and resolves relative `import`, `export ... from`, `require`, and literal dynamic imports to files or `index` modules; `.js` specifiers can resolve to `.ts`/`.tsx`.
+3. Same-directory `README.md` plus Python `__init__.py` or JS/TS `index` files, justified as module documentation or entry points. Other neighbors are not selected arbitrarily.
+
+Candidates are deduplicated and tagged with a reason. Imported context files do not trigger further dependency expansion. External packages, computed imports, and custom TS path aliases are not resolved in this milestone. Python import discovery is best effort for syntax supported by the backend's Python version. Context shared across changed files can be reused without another download.
+
+The review response includes **only context actually sent to the model**, with `path`, `reason`, and `used_for` changed-file paths. If a context file is omitted from a model request to respect the input budget, it is not claimed as used for that file. Root README may be absent; review still works with available full changed files.
+
+## Safety and size limits
+
+These fixed limits live in `backend/context.py`:
+
+| Limit | Maximum |
+| --- | --- |
+| Changed-file retrieval attempts | 20 per review |
+| Context candidates inspected | 24 per review |
+| Direct import matches | 20 per changed file |
+| Additional context files selected | 8 per review |
+| Full text file size | 24,000 UTF-8 bytes per file |
+| Patch size | 24,000 characters per changed file |
+| Combined source content and patches | 80,000 characters per review |
+| Model input per request | 60,000 characters |
+| Cumulative model input across requests | 200,000 characters per review |
+| Git tree entries inspected | 10,000 |
+| Streamed Git tree response | 2,000,000 bytes |
+| Streamed file response | 64,000 bytes |
+
+Model input counts include the serialized filename/patch/full-content/context payload, instructions, and a conservative allowance for the structured-output schema. These are character budgets, not token estimates. Each file still has a maximum of 10 findings and 6,000 output tokens.
+
+Only allowlisted text extensions are eligible. Dependencies (`node_modules`, `vendor`, virtual environments), `.git`, build/dist/Next output, caches, coverage, generated directories, declaration files (`.d.ts`), minified assets, source maps, lockfiles, images, unsupported extensions, symlinks, and submodules are excluded. NUL/control bytes, non-UTF-8 data, and generated-file headers in the first five lines are also rejected. `.env` and key/certificate extensions are not eligible.
+
+Full files are never silently truncated. If a changed file cannot fit, it is skipped with a reason rather than falling back to patch-only review. Context omissions and truncated tree discovery produce coverage notes. An over-limit tree response returns HTTP 413; GitHub transport, API, and rate-limit failures retain actionable errors. Optional missing files return skip notes. These are conservative selection heuristics, not complete repository understanding.
+
+GitHub itself can truncate recursive tree listings, and patches may be partial. See the [Git tree API](https://docs.github.com/en/rest/git/trees#get-a-tree) and [Contents API](https://docs.github.com/en/rest/repos/contents#get-repository-content). PR metadata/diff requests are separate GitHub calls; if a PR is updated during retrieval, re-fetch it to refresh. Full files and selected context remain pinned to the captured commit.
+
+## Milestone 4 architecture
+
+```text
+Next.js: Fetch Pull Request → /analyze → PR metadata + changed files
+Next.js: Analyze with AI → /review
+  github.py: PR metadata, diffs, head repository and commit
+  context.py: bounded tree → full changed files → deterministic context selection
+  review.py: bounded full-content + patch + context inputs → structured OpenAI findings
+  response: PR data + findings + actually-used context + skipped files/coverage notes
+```
+
+Internal Pydantic structures distinguish `FullChangedFile` (path, status, patch, full content, skip reason), `ContextFile` (path, content, selection reason), and `RepositoryContext` (repository, commit, changed files, context files, warnings). The frontend keeps the findings interface and adds a small context section. There are no agents, automatic fixes, GitHub comments, database, Docker, or repository mutations.
 
 ## Optional GitHub token
 
@@ -127,18 +182,21 @@ The frontend defaults to `http://localhost:8000`. To change it, set `NEXT_PUBLIC
 It returns:
 
 - `repository`, `pull_request`, `title`, `state`, `author`
-- `base_branch`, `head_branch`, `changed_files`, `additions`, `deletions`
+- `base_branch`, `head_branch`, `head_repository`, `head_sha`, `changed_files`, `additions`, `deletions`
 - `files`: objects with `filename`, `status`, `additions`, `deletions`, and `patch` (null when GitHub omits it)
 - `files_truncated`: whether fewer files were retrieved than the PR metadata reports
 
 The backend requests `/repos/{owner}/{repo}/pulls/{number}` and `/repos/{owner}/{repo}/pulls/{number}/files`, paginating at 100 files per page. GitHub caps this endpoint at 3,000 files; GitHub patches may be absent or partial, so they are displayed as returned. If the PR changes during retrieval, metadata and files can differ; re-fetch to refresh. See [GitHub pull request API documentation](https://docs.github.com/en/rest/pulls/pulls#list-pull-requests-files).
 
+`POST /review` accepts the same input and additionally returns `findings`, `reviewed_files`, `skipped_files`, `model`, `repository_context` (path/reason/used_for metadata, not context contents), `context_warnings`, `skipped_file_details` (path/reason), and `input_characters` (conservative input budget used).
+
 Errors use FastAPI's `detail` field:
 
+- **413**: repository tree response exceeds the context safety limit
 - **422**: invalid repository format or PR number
 - **404**: repository not found/inaccessible, or PR not found (a repository lookup distinguishes these)
 - **429**: GitHub rate limit (includes `Retry-After`), or OpenAI rate limit/quota
-- **502**: GitHub or OpenAI connection/API errors, rejected credentials, malformed model JSON, unsupported file/line references, model refusal, or incomplete output
+- **502**: GitHub or OpenAI connection/API errors, rejected credentials, malformed model JSON, unsupported file/line references or invalid repository context data, model refusal, or incomplete output
 - **503**: missing backend `OPENAI_API_KEY` for `/review`
 - **504**: GitHub timeout (10-second HTTP timeout; 45-second overall retrieval limit), or OpenAI timeout
 
@@ -146,7 +204,7 @@ GitHub also returns 404 for private repositories the caller cannot access, so th
 
 ## Checks
 
-Backend tests exercise GitHub retrieval and the real OpenAI SDK parser with mocked HTTP responses. They need no token, API key, internet, or API spend:
+Backend tests exercise GitHub retrieval, repository selection, full-file retrieval, fork/head snapshots, source and model budgets, exclusion rules, context failures, and the real OpenAI SDK parser with mocked HTTP responses. They need no token, API key, internet, or API spend:
 
 ```sh
 cd backend
@@ -173,6 +231,8 @@ repopilot/
   backend/
     main.py
     github.py
+    context.py
+    test_context.py
     test_github.py
     review.py
     test_review.py
@@ -183,6 +243,7 @@ repopilot/
       layout.tsx
       page.tsx
       review-findings.tsx
+      repository-context.tsx
     eslint.config.mjs
     next-env.d.ts
     next.config.ts

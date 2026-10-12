@@ -12,7 +12,7 @@ from main import app
 
 METADATA = {
     'title': 'Add sample', 'state': 'open', 'user': {'login': 'Dahlia00'},
-    'base': {'ref': 'main'}, 'head': {'ref': 'sample'},
+    'base': {'ref': 'main'}, 'head': {'ref': 'sample', 'sha': 'a' * 40, 'repo': {'full_name': 'Dahlia00/repopilot'}},
     'changed_files': 2, 'additions': 8, 'deletions': 1,
 }
 FILES = [
@@ -61,6 +61,7 @@ class GitHubEndpointTests(unittest.TestCase):
             'repository': 'Dahlia00/repopilot', 'pull_request': 1, 'title': 'Add sample',
             'state': 'open', 'author': 'Dahlia00', 'base_branch': 'main', 'head_branch': 'sample',
             'changed_files': 2, 'additions': 8, 'deletions': 1,
+            'head_sha': 'a' * 40, 'head_repository': 'Dahlia00/repopilot',
             'files': [FILES[0], {**FILES[1], 'patch': None}], 'files_truncated': False,
         })
         self.assertEqual(self.requests[1].url.params['per_page'], '100')

@@ -2,6 +2,10 @@
 import { useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import ReviewFindings, { type Finding } from './review-findings';
+import RepositoryContext, {
+  type ContextFileMetadata,
+  type SkippedFileMetadata,
+} from './repository-context';
 type ChangedFile = {
   filename: string;
   status: string;
@@ -28,6 +32,11 @@ type Review = Analysis & {
   reviewed_files: string[];
   skipped_files: string[];
   model: string;
+  repository_context: ContextFileMetadata[];
+  context_warnings: string[];
+  skipped_file_details: SkippedFileMetadata[];
+  head_sha: string;
+  head_repository: string;
 };
 const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -110,7 +119,7 @@ export default function Home() {
           repository: analysis.repository,
           pull_request: analysis.pull_request,
         }),
-        signal: AbortSignal.timeout(360000),
+        signal: AbortSignal.timeout(420000),
       });
       if (!response.ok) {
         const body: { detail?: unknown } = await response.json().catch(() => ({}));
@@ -205,7 +214,7 @@ export default function Home() {
               </div>
             </div>
             <div className="form-footer">
-              <p>Fetch changes, then choose AI review to send patches to OpenAI.</p>
+              <p>AI review sends full changed files, diffs, and selected context to OpenAI.</p>
               <div className="actions">
                 <button className="secondary-button" disabled={busy} type="submit">
                   {loading && <span className="spinner" aria-hidden="true" />}
@@ -325,14 +334,23 @@ export default function Home() {
           </p>
         )}
         {review && (
-          <ReviewFindings
-            findings={review.findings}
-            reviewedFiles={review.reviewed_files}
-            skippedFiles={review.skipped_files}
-          />
+          <>
+            <ReviewFindings
+              findings={review.findings}
+              reviewedFiles={review.reviewed_files}
+              skippedFiles={review.skipped_files}
+            />
+            <RepositoryContext
+              files={review.repository_context}
+              warnings={review.context_warnings}
+              skippedFiles={review.skipped_file_details}
+              repository={review.head_repository}
+              commit={review.head_sha}
+            />
+          </>
         )}
         <footer>
-          RepoPilot <span>Milestone 03 · AI code review</span>
+          RepoPilot <span>Milestone 04 · Repository understanding</span>
         </footer>
       </main>
     </div>
