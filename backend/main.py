@@ -1,11 +1,13 @@
 import asyncio
 
 import httpx
+from openai import AsyncOpenAI
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from github import PullRequestResponse, fetch_pull_request, get_github_client
+from review import ReviewResponse, get_openai_client, review_patches
 
 
 class AnalyzeRequest(BaseModel):
@@ -51,3 +53,16 @@ async def analyze(
         )
     except asyncio.TimeoutError as exc:
         raise HTTPException(504, 'Fetching GitHub pull request data timed out. Please try again.') from exc
+
+
+@app.post('/review', response_model=ReviewResponse)
+async def review(
+    request: AnalyzeRequest,
+    client: httpx.AsyncClient = Depends(get_github_client),
+    ai_client: AsyncOpenAI = Depends(get_openai_client),
+) -> ReviewResponse:
+    pr = await analyze(request, client)
+    try:
+        return await asyncio.wait_for(review_patches(pr, ai_client), timeout=300)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(504, 'AI review exceeded the five-minute time limit. No partial review is returned.') from exc
