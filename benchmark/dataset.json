@@ -1,0 +1,152 @@
+[
+  {
+    "case_id": "sql_injection",
+    "language": "python",
+    "category": "Security",
+    "expected_issue": true,
+    "expected_severity": "MEDIUM",
+    "expected_location": {
+      "file": "benchmark/cases/sql_injection.py",
+      "line": 3
+    },
+    "description": "User input concatenated into SQL.",
+    "file": "benchmark/cases/sql_injection.py"
+  },
+  {
+    "case_id": "empty_index",
+    "language": "python",
+    "category": "Bug",
+    "expected_issue": true,
+    "expected_severity": "MEDIUM",
+    "expected_location": {
+      "file": "benchmark/cases/empty_index.py",
+      "line": 3
+    },
+    "description": "Indexing an unchecked possibly empty collection.",
+    "file": "benchmark/cases/empty_index.py"
+  },
+  {
+    "case_id": "command_injection",
+    "language": "python",
+    "category": "Security",
+    "expected_issue": true,
+    "expected_severity": "HIGH",
+    "expected_location": {
+      "file": "benchmark/cases/command_injection.py",
+      "line": 4
+    },
+    "description": "Untrusted input passed to a shell.",
+    "file": "benchmark/cases/command_injection.py"
+  },
+  {
+    "case_id": "fake_secret",
+    "language": "python",
+    "category": "Security",
+    "expected_issue": true,
+    "expected_severity": "LOW",
+    "expected_location": {
+      "file": "benchmark/cases/fake_secret.py",
+      "line": 2
+    },
+    "description": "A deliberately fake hardcoded password.",
+    "file": "benchmark/cases/fake_secret.py"
+  },
+  {
+    "case_id": "path_traversal",
+    "language": "python",
+    "category": "Security",
+    "expected_issue": true,
+    "expected_severity": "HIGH",
+    "expected_location": {
+      "file": "benchmark/cases/path_traversal.py",
+      "line": 4
+    },
+    "description": "Untrusted relative path can escape the intended root.",
+    "file": "benchmark/cases/path_traversal.py"
+  },
+  {
+    "case_id": "missing_validation",
+    "language": "python",
+    "category": "Bug",
+    "expected_issue": true,
+    "expected_severity": "MEDIUM",
+    "expected_location": {
+      "file": "benchmark/cases/missing_validation.py",
+      "line": 3
+    },
+    "description": "Zero divisors are accepted without validation.",
+    "file": "benchmark/cases/missing_validation.py"
+  },
+  {
+    "case_id": "repeated_computation",
+    "language": "python",
+    "category": "Performance",
+    "expected_issue": true,
+    "expected_severity": "LOW",
+    "expected_location": {
+      "file": "benchmark/cases/repeated_computation.py",
+      "line": 3
+    },
+    "description": "Sorting the entire collection on each iteration.",
+    "file": "benchmark/cases/repeated_computation.py"
+  },
+  {
+    "case_id": "safe_python",
+    "language": "python",
+    "category": "Bug",
+    "expected_issue": false,
+    "expected_severity": null,
+    "expected_location": null,
+    "description": "Explicit empty collection contract, no expected issue.",
+    "file": "benchmark/cases/safe_python.py"
+  },
+  {
+    "case_id": "unsafe_input",
+    "language": "javascript",
+    "category": "Security",
+    "expected_issue": true,
+    "expected_severity": "HIGH",
+    "expected_location": {
+      "file": "benchmark/cases/unsafe_input.js",
+      "line": 3
+    },
+    "description": "Untrusted input evaluated as JavaScript.",
+    "file": "benchmark/cases/unsafe_input.js"
+  },
+  {
+    "case_id": "missing_null",
+    "language": "typescript",
+    "category": "Bug",
+    "expected_issue": true,
+    "expected_severity": "MEDIUM",
+    "expected_location": {
+      "file": "benchmark/cases/missing_null.ts",
+      "line": 3
+    },
+    "description": "Nullable object dereferenced without checking.",
+    "file": "benchmark/cases/missing_null.ts"
+  },
+  {
+    "case_id": "repeated_operation",
+    "language": "javascript",
+    "category": "Performance",
+    "expected_issue": true,
+    "expected_severity": "LOW",
+    "expected_location": {
+      "file": "benchmark/cases/repeated_operation.js",
+      "line": 3
+    },
+    "description": "Sorting repeated while mapping an array.",
+    "file": "benchmark/cases/repeated_operation.js"
+  },
+  {
+    "case_id": "safe_typescript",
+    "language": "typescript",
+    "category": "Bug",
+    "expected_issue": false,
+    "expected_severity": null,
+    "expected_location": null,
+    "description": "Explicit nullable handling, no expected issue.",
+    "file": "benchmark/cases/safe_typescript.ts"
+  }
+]

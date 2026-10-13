@@ -336,6 +336,9 @@ def severe_regression(before: Check, after: Check, original: str | None = None, 
     return bool(counts(after) - counts(before))
 
 
+from observability import stage
+
+@stage('verification')
 async def verify_one(fix: ValidatedFix, repository: RepositoryContext, tests: TestGenerationResponse) -> VerificationResult:
     result = VerificationResult(finding_id=fix.finding_id, file=fix.file, title=fix.title, proposal=fix)
     def stop(message, status='SKIPPED'):

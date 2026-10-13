@@ -1,0 +1,413 @@
+{
+  "generated_at": "2026-10-13T19:17:54.507541+00:00",
+  "total_cases": 12,
+  "mode": "static",
+  "python": "3.10.7",
+  "versions": {
+    "bandit": "1.9.4",
+    "semgrep": "1.180.0",
+    "openai": "2.54.0"
+  },
+  "ai_status": "not_run",
+  "methodology": "Issue-level exact category/line matching; duplicates collapse by category/line; unsupported cases count as misses. Severity is recorded, not used for matching. This small synthetic dataset is not evidence of general real-world accuracy.",
+  "metrics": {
+    "Bandit": {
+      "true_positives": 3,
+      "false_positives": 1,
+      "false_negatives": 7,
+      "precision": 0.75,
+      "recall": 0.3,
+      "f1": 0.4285714285714285
+    },
+    "Semgrep": {
+      "true_positives": 2,
+      "false_positives": 0,
+      "false_negatives": 8,
+      "precision": 1.0,
+      "recall": 0.2,
+      "f1": 0.33333333333333337
+    },
+    "combined": {
+      "true_positives": 4,
+      "false_positives": 1,
+      "false_negatives": 6,
+      "precision": 0.8,
+      "recall": 0.4,
+      "f1": 0.5333333333333333
+    },
+    "AI": null
+  },
+  "average_analysis_latency_seconds": 1.0611449131683912,
+  "findings_per_case": {
+    "sql_injection": 1,
+    "empty_index": 0,
+    "command_injection": 3,
+    "fake_secret": 1,
+    "path_traversal": 0,
+    "missing_validation": 0,
+    "repeated_computation": 0,
+    "safe_python": 0,
+    "unsafe_input": 1,
+    "missing_null": 0,
+    "repeated_operation": 0,
+    "safe_typescript": 0
+  },
+  "cases": [
+    {
+      "case_id": "sql_injection",
+      "static_latency_seconds": 1.0416095000691712,
+      "ai_latency_seconds": null,
+      "scanners": [
+        {
+          "source": "bandit",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/sql_injection.py"
+          ]
+        },
+        {
+          "source": "semgrep",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/sql_injection.py"
+          ]
+        }
+      ],
+      "findings": [
+        {
+          "source": "bandit",
+          "severity": "MEDIUM",
+          "category": "Security",
+          "file": "benchmark/cases/sql_injection.py",
+          "line": 3,
+          "rule_id": "B608",
+          "title": "Hardcoded sql expressions",
+          "explanation": "Possible SQL injection vector through string-based query construction."
+        }
+      ],
+      "ai_findings": []
+    },
+    {
+      "case_id": "empty_index",
+      "static_latency_seconds": 1.3269980000331998,
+      "ai_latency_seconds": null,
+      "scanners": [
+        {
+          "source": "bandit",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/empty_index.py"
+          ]
+        },
+        {
+          "source": "semgrep",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/empty_index.py"
+          ]
+        }
+      ],
+      "findings": [],
+      "ai_findings": []
+    },
+    {
+      "case_id": "command_injection",
+      "static_latency_seconds": 1.147345207980834,
+      "ai_latency_seconds": null,
+      "scanners": [
+        {
+          "source": "bandit",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/command_injection.py"
+          ]
+        },
+        {
+          "source": "semgrep",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/command_injection.py"
+          ]
+        }
+      ],
+      "findings": [
+        {
+          "source": "bandit",
+          "severity": "LOW",
+          "category": "Security",
+          "file": "benchmark/cases/command_injection.py",
+          "line": 2,
+          "rule_id": "B404",
+          "title": "Blacklist",
+          "explanation": "Consider possible security implications associated with the subprocess module."
+        },
+        {
+          "source": "bandit",
+          "severity": "HIGH",
+          "category": "Security",
+          "file": "benchmark/cases/command_injection.py",
+          "line": 4,
+          "rule_id": "B602",
+          "title": "Subprocess popen with shell equals true",
+          "explanation": "subprocess call with shell=True identified, security issue."
+        },
+        {
+          "source": "semgrep",
+          "severity": "MEDIUM",
+          "category": "Security",
+          "file": "benchmark/cases/command_injection.py",
+          "line": 4,
+          "rule_id": "python-shell-command",
+          "title": "Shell command execution",
+          "explanation": "Enabling shell execution can expose command injection when arguments contain untrusted input. Prefer an argument list with shell disabled."
+        }
+      ],
+      "ai_findings": []
+    },
+    {
+      "case_id": "fake_secret",
+      "static_latency_seconds": 1.3592638340778649,
+      "ai_latency_seconds": null,
+      "scanners": [
+        {
+          "source": "bandit",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/fake_secret.py"
+          ]
+        },
+        {
+          "source": "semgrep",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/fake_secret.py"
+          ]
+        }
+      ],
+      "findings": [
+        {
+          "source": "bandit",
+          "severity": "LOW",
+          "category": "Security",
+          "file": "benchmark/cases/fake_secret.py",
+          "line": 2,
+          "rule_id": "B105",
+          "title": "Hardcoded password string",
+          "explanation": "Possible hardcoded password: 'benchmark_dummy_not_a_real_credential'"
+        }
+      ],
+      "ai_findings": []
+    },
+    {
+      "case_id": "path_traversal",
+      "static_latency_seconds": 1.1644124999875203,
+      "ai_latency_seconds": null,
+      "scanners": [
+        {
+          "source": "bandit",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/path_traversal.py"
+          ]
+        },
+        {
+          "source": "semgrep",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/path_traversal.py"
+          ]
+        }
+      ],
+      "findings": [],
+      "ai_findings": []
+    },
+    {
+      "case_id": "missing_validation",
+      "static_latency_seconds": 1.0175542080542073,
+      "ai_latency_seconds": null,
+      "scanners": [
+        {
+          "source": "bandit",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/missing_validation.py"
+          ]
+        },
+        {
+          "source": "semgrep",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/missing_validation.py"
+          ]
+        }
+      ],
+      "findings": [],
+      "ai_findings": []
+    },
+    {
+      "case_id": "repeated_computation",
+      "static_latency_seconds": 0.9894562920089811,
+      "ai_latency_seconds": null,
+      "scanners": [
+        {
+          "source": "bandit",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/repeated_computation.py"
+          ]
+        },
+        {
+          "source": "semgrep",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/repeated_computation.py"
+          ]
+        }
+      ],
+      "findings": [],
+      "ai_findings": []
+    },
+    {
+      "case_id": "safe_python",
+      "static_latency_seconds": 1.0323558329837397,
+      "ai_latency_seconds": null,
+      "scanners": [
+        {
+          "source": "bandit",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/safe_python.py"
+          ]
+        },
+        {
+          "source": "semgrep",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/safe_python.py"
+          ]
+        }
+      ],
+      "findings": [],
+      "ai_findings": []
+    },
+    {
+      "case_id": "unsafe_input",
+      "static_latency_seconds": 0.9175069999182597,
+      "ai_latency_seconds": null,
+      "scanners": [
+        {
+          "source": "bandit",
+          "status": "skipped",
+          "message": "No supported full changed files available.",
+          "files": []
+        },
+        {
+          "source": "semgrep",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/unsafe_input.js"
+          ]
+        }
+      ],
+      "findings": [
+        {
+          "source": "semgrep",
+          "severity": "MEDIUM",
+          "category": "Security",
+          "file": "benchmark/cases/unsafe_input.js",
+          "line": 3,
+          "rule_id": "javascript-dynamic-eval",
+          "title": "Dynamic JavaScript code evaluation",
+          "explanation": "Dynamic evaluation can execute untrusted JavaScript. Prefer explicit parsing and validation."
+        }
+      ],
+      "ai_findings": []
+    },
+    {
+      "case_id": "missing_null",
+      "static_latency_seconds": 0.9127890421077609,
+      "ai_latency_seconds": null,
+      "scanners": [
+        {
+          "source": "bandit",
+          "status": "skipped",
+          "message": "No supported full changed files available.",
+          "files": []
+        },
+        {
+          "source": "semgrep",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/missing_null.ts"
+          ]
+        }
+      ],
+      "findings": [],
+      "ai_findings": []
+    },
+    {
+      "case_id": "repeated_operation",
+      "static_latency_seconds": 0.9038204159587622,
+      "ai_latency_seconds": null,
+      "scanners": [
+        {
+          "source": "bandit",
+          "status": "skipped",
+          "message": "No supported full changed files available.",
+          "files": []
+        },
+        {
+          "source": "semgrep",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/repeated_operation.js"
+          ]
+        }
+      ],
+      "findings": [],
+      "ai_findings": []
+    },
+    {
+      "case_id": "safe_typescript",
+      "static_latency_seconds": 0.9096955410204828,
+      "ai_latency_seconds": null,
+      "scanners": [
+        {
+          "source": "bandit",
+          "status": "skipped",
+          "message": "No supported full changed files available.",
+          "files": []
+        },
+        {
+          "source": "semgrep",
+          "status": "completed",
+          "message": "Scan completed.",
+          "files": [
+            "benchmark/cases/safe_typescript.ts"
+          ]
+        }
+      ],
+      "findings": [],
+      "ai_findings": []
+    }
+  ]
+}

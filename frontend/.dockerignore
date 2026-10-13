@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+*.key
+*.pem
+secrets*
+.venv
+__pycache__
+node_modules
+.next
+*.tsbuildinfo
+.pytest_cache

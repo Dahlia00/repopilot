@@ -5,7 +5,6 @@ import httpx
 from openai import AsyncOpenAI
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from github import PullRequestResponse, fetch_pull_request, get_github_client
 from review import get_openai_client, review_patches, Finding
@@ -15,60 +14,22 @@ from pipeline import PipelineResponse, combine_review
 from test_generation import TestGenerationResponse, generate_tests, ValidatedProposal, IdentifiedFinding
 from fix_generation import FixGenerationResponse, generate_fixes, ValidatedFix, target_function
 from verification import VerificationResponse, VerificationResult, verify_fixes, verify_one, module_path
-from agents import orchestrate, STORE
+from agents import orchestrate, STORE, AgentReviewResponse
 from github_actions import review_plan, fix_plan, post_review, create_fix_pr, public_data
 
 
-class AnalyzeRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
-    repository: str = Field(pattern=r'^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+$', max_length=200)
-    pull_request: int = Field(strict=True, gt=0)
+from api_models import AnalyzeRequest, HealthResponse, VerifyFixRequest, GenerateFixRequest, GithubActionRequest
+from config import settings
+from observability import install, emit
 
-    @field_validator('repository')
-    @classmethod
-    def validate_repository(cls, value: str) -> str:
-        if value.split('/')[1] in {'.', '..'}:
-            raise ValueError('Repository must be in owner/repo format.')
-        return value
-
-
-class HealthResponse(BaseModel):
-    status: str
-    service: str
-
-
-class VerifyFixRequest(AnalyzeRequest):
-    model_config = ConfigDict(extra='forbid')
-    head_sha: str = Field(pattern=r'^[0-9a-f]{40}$')
-    finding: Finding
-    validated_fix: ValidatedFix
-    validated_test: ValidatedProposal | None = None
-
-
-class GenerateFixRequest(AnalyzeRequest):
-    test_artifacts: TestGenerationResponse | None = None
-
-    @field_validator('test_artifacts')
-    @classmethod
-    def limit_test_artifacts(cls, value):
-        if value is not None and (len(value.tests) > 5 or len(value.findings) > 200):
-            raise ValueError('Test artifact count exceeds generation limits.')
-        return value
-
-
-class GithubActionRequest(AnalyzeRequest):
-    model_config = ConfigDict(extra='forbid')
-    review_id: str = Field(pattern=r'^[0-9a-f-]{36}$')
-    finding_id: str | None = Field(default=None, max_length=80)
-    confirm_write: bool = Field(default=False, strict=True)
-
-
-app = FastAPI(title='RepoPilot API')
+app = FastAPI(title='RepoPilot API', version='1.0.0')
+install(app)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['http://localhost:3000', 'http://127.0.0.1:3000'],
+    allow_origins=list(settings().allowed_origins),
     allow_methods=['GET', 'POST'],
     allow_headers=['Content-Type'],
+    expose_headers=['X-Request-ID', 'X-Process-Time-Ms'],
 )
 
 
@@ -197,7 +158,7 @@ async def verify_existing_fix(
         raise HTTPException(504, 'Deterministic verification timed out; temporary processes and files were cleaned up.') from exc
 
 
-@app.post('/agent-review')
+@app.post('/agent-review', response_model=AgentReviewResponse)
 async def agent_review(request: AnalyzeRequest, client: httpx.AsyncClient = Depends(get_github_client),
                        ai_client: AsyncOpenAI = Depends(get_openai_client)):
     pr = await analyze(request, client)
@@ -212,7 +173,9 @@ async def agent_review(request: AnalyzeRequest, client: httpx.AsyncClient = Depe
 
 @app.post('/github/preview-review')
 async def preview_github_review(request: GithubActionRequest):
-    return review_plan(STORE.get(request.review_id, request.repository, request.pull_request))
+    plan = review_plan(STORE.get(request.review_id, request.repository, request.pull_request))
+    emit('github.preview.generated')
+    return plan
 
 
 @app.post('/github/post-review')
@@ -222,10 +185,18 @@ async def post_github_review(request: GithubActionRequest, client: httpx.AsyncCl
 
 @app.post('/github/preview-fix-pr')
 async def preview_github_fix_pr(request: GithubActionRequest):
-    return fix_plan(STORE.get(request.review_id, request.repository, request.pull_request), request.finding_id)
+    plan = fix_plan(STORE.get(request.review_id, request.repository, request.pull_request), request.finding_id)
+    emit('github.preview.generated')
+    return plan
 
 
 @app.post('/github/create-fix-pr')
 async def create_github_fix_pr(request: GithubActionRequest, client: httpx.AsyncClient = Depends(get_github_client)):
     return await create_fix_pr(STORE.get(request.review_id, request.repository, request.pull_request), client,
                                request.finding_id, request.confirm_write)
+
+# Versioned aliases share handlers/models; existing clients remain compatible.
+for route in list(app.routes):
+    if getattr(route, 'path', '') == '/health' or getattr(route, 'path', '').startswith(('/analyze', '/review', '/generate-', '/verify-', '/agent-review', '/github/')):
+        app.add_api_route('/api/v1' + route.path, route.endpoint, methods=route.methods,
+                          response_model=route.response_model, name='v1_' + route.name)

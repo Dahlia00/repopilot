@@ -633,3 +633,11 @@ button:disabled {
 .generated-code {
   margin-top: 20px;
 }
+.pipeline-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; list-style: none; padding: 0; margin: 24px 0; }
+.pipeline-steps li { padding: 12px; border: 1px solid #293241; border-radius: 8px; font-size: 12px; color: #929dad; }
+.pipeline-steps li span { display: block; margin-bottom: 8px; font-family: monospace; }
+.pipeline-steps li.complete { color: #a2e7cb; border-color: #345f53; background: #132720; }
+.analysis-metrics { display: grid; grid-template-columns: repeat(7, 1fr); gap: 12px; margin: 20px 0; }
+.analysis-metrics strong { display: block; font-size: 24px; font-weight: 600; }
+.analysis-metrics span { font-size: 11px; color: #929dad; }
+@media (max-width: 800px) { .pipeline-steps { grid-template-columns: repeat(2, 1fr); } .analysis-metrics { grid-template-columns: repeat(3, 1fr); } }

@@ -225,6 +225,9 @@ async def read_file(client: httpx.AsyncClient, repository: str, commit: str,
     return content, None
 
 
+from observability import stage
+
+@stage('context.selected')
 async def build_repository_context(pr: PullRequestResponse, client: httpx.AsyncClient) -> RepositoryContext:
     warnings: list[str] = []
     data, _ = await github_json(client, f'/repos/{pr.head_repository}/git/trees/{pr.head_sha}',

@@ -19,7 +19,8 @@ from context import (
     MAX_MODEL_INPUT_CHARS, MAX_TOTAL_MODEL_INPUT_CHARS,
 )
 
-MODEL = 'gpt-4.1-mini-2025-04-14'
+from config import settings
+MODEL = settings().model
 MAX_FINDINGS_PER_FILE = 10
 SEVERITY_ORDER = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}
 INSTRUCTIONS = """You are a repository-aware code reviewer. You receive the PR patch,
@@ -128,6 +129,9 @@ def visible_new_lines(patch: str) -> set[int]:
     return lines
 
 
+from observability import stage
+
+@stage('ai.review')
 async def review_patches(pr: PullRequestResponse, client: AsyncOpenAI,
                          repository: RepositoryContext, *, role_instructions: str = '',
                          input_budget: int | None = None,

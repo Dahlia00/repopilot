@@ -169,6 +169,9 @@ def senior_review(findings,verification,gaps):
         human_review_required=human,coverage_gaps=gaps)
 
 
+from observability import stage
+
+@stage('agent.review')
 async def orchestrate(pr,snapshot,static,client):
     pr=PullRequestResponse.model_validate(pr.model_dump())
     gate=asyncio.Semaphore(2)

@@ -216,6 +216,9 @@ def validate_fix(proposal: FixProposal, content: str, target: ast.FunctionDef):
     return errors, diff
 
 
+from observability import stage
+
+@stage('fixes.proposed')
 async def generate_fixes(review: PipelineResponse, repository: RepositoryContext,
                          tests: TestGenerationResponse, client: AsyncOpenAI) -> FixGenerationResponse:
     sources = {file.path: file for file in repository.changed_files}

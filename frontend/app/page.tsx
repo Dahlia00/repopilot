@@ -1,6 +1,7 @@
 'use client';
 import { useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import PipelineOverview from './pipeline-overview';
 import AgentDashboard, { type AgentReview } from './agent-dashboard';
 import Verification, { type FixVerification } from './fix-verification';
 import ProposedFixes, { type FixGeneration, type FixArtifact } from './proposed-fixes';
@@ -329,6 +330,16 @@ export default function Home() {
             Explore pull request changes and get actionable AI code review findings.
           </p>
         </section>
+        <PipelineOverview fetched={!!analysis} reviewed={!!review || !!agents} agentReviewed={!!agents}
+          filesLabel={review ? 'Files reviewed' : agents ? 'Files with findings' : 'Files reviewed'}
+          fixes={fixes?.total_fixes ?? agents?.fixes.fixes.length ?? 0}
+          files={review?.reviewed_files.length ?? new Set(agents?.findings.map(f => f.file) ?? []).size} contextFiles={review?.repository_context.length ?? agents?.repository_context.length ?? 0}
+          aiFindings={review?.ai_findings.length ?? agents?.findings.filter(f => f.evidence.some(e => e.source === 'AI')).length ?? 0}
+          staticFindings={review?.static_findings.length ?? agents?.findings.filter(f => f.evidence.some(e => e.source === 'Bandit' || e.source === 'Semgrep')).length ?? 0}
+          confirmed={agents?.findings.filter(f => f.status === 'CONFIRMED').length ?? 0}
+          tests={generated?.total_tests ?? agents?.tests.total_tests ?? 0}
+          verified={verification?.passed ?? agents?.verification.passed ?? 0}
+          ambiguous={!!agents?.findings.some(f => f.status === 'AMBIGUOUS') || !!fixes?.fixes.some(f => f.compatibility.behavior_ambiguous)} />
         <section className="panel" aria-labelledby="review-title">
           <div className="section-heading">
             <div>

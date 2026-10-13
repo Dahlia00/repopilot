@@ -215,6 +215,9 @@ def validate_code(proposal: TestProposal, module_name: str, function_name: str) 
     return []
 
 
+from observability import stage
+
+@stage('tests.generated')
 async def generate_tests(review: ReviewResponse, repository: RepositoryContext,
                          client: AsyncOpenAI) -> TestGenerationResponse:
     findings = identified(review.findings)

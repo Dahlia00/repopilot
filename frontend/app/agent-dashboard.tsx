@@ -10,7 +10,8 @@ type Observation = {
 };
 export type AgentReview = {
   review_id: string;
-  pr: { repository: string; pull_request: number; head_sha: string };
+  pr: { repository: string; pull_request: number; head_sha: string; files: {filename: string; patch: string | null}[] };
+  repository_context: {path: string; reason: string; used_for: string[]}[];
   agents: { agent: string; status: string; findings: Observation[]; notes: string[] }[];
   findings: Observation[];
   tests: TestGeneration;

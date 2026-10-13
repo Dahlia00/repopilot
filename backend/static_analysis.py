@@ -177,6 +177,9 @@ async def run_scanner(source: str, paths: list[Path], root: Path, env: dict[str,
         return [], ScannerReport(source=source, status='error', message='Scanner returned malformed or over-limit output; results were not accepted.', files=originals)
 
 
+from observability import stage
+
+@stage('static.analysis')
 async def run_static_analysis(repository: RepositoryContext) -> StaticResult:
     findings = []
     reports = []

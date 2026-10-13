@@ -6,3 +6,11 @@ frontend/.next/
 frontend/*.tsbuildinfo
 .env
 .env.local
+
+.env.*
+!.env.example
+*.key
+secrets/
+secrets.*
+*.pem
+.pytest_cache/

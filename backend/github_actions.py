@@ -20,7 +20,8 @@ SECRET=re.compile(r'(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{12,}|AKIA[A-Z
 
 
 def write_enabled():
-    return os.environ.get('GITHUB_WRITE_ENABLED','false').strip().lower()=='true'
+    from config import settings
+    return settings().github_write_enabled
 
 
 def redact(text):

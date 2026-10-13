@@ -109,6 +109,9 @@ async def github_json(client: httpx.AsyncClient, path: str, *, max_response_byte
     return data, response
 
 
+from observability import stage
+
+@stage('pr.fetched')
 async def fetch_pull_request(client: httpx.AsyncClient, repository: str, number: int) -> PullRequestResponse:
     path = f'/repos/{repository}/pulls/{number}'
     try:

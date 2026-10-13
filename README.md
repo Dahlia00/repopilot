@@ -1,648 +1,220 @@
 # RepoPilot
 
-AI-powered code review and debugging assistant — milestone 9: coordinated agent review and controlled GitHub previews/automation.
+[![CI](https://github.com/Dahlia00/repopilot/actions/workflows/ci.yml/badge.svg)](https://github.com/Dahlia00/repopilot/actions/workflows/ci.yml)
 
-RepoPilot fetches real GitHub PR metadata and changed files, displays expandable patches, combines repository-aware AI review with local Bandit and optional Semgrep scans, generates statically validated pytest and local code-fix proposals, and verifies eligible fixes with restricted pytest execution and before/after scans in disposable workspaces. Public GitHub repositories work without a GitHub token. AI review requires a backend OPENAI_API_KEY. Verification runs only in temporary workspaces. The default GitHub mode is read-only: Agent Review and preview endpoints never write. Explicit backend write actions require both the environment switch and request confirmation. No database or Docker is added.
+A repository-aware GitHub pull request review tool combining AI observations, static security analysis, behavioral contracts, generated regression tests, and deterministic fix verification. Proposed changes stay separate from approval. **GitHub writes are disabled by default.**
 
-## Requirements
+## Demo
 
-- Python 3.10 or newer
-- Node.js 20.9 or newer and npm
+Run locally, open <http://localhost:3000>, and fetch `Dahlia00/repopilot`, PR `1`. Choose **Analyze with AI**, or **Run Agent Review** for bounded specialist reviews. Inspect context, scanner evidence, proposed tests/fixes, verification, and GitHub previews. The intentionally unsafe sample is a demonstration, not an application dependency.
 
-## Run locally
+An empty-list issue does not establish whether the API should return a sentinel or raise an exception. When repository evidence cannot resolve that question, RepoPilot marks the contract ambiguous and refuses automatic approval. A failed/skipped verification is an honest result.
 
-From the `repopilot` project root, use two separate terminals.
+## Why RepoPilot
 
-### Backend (terminal 1)
+A plausible AI suggestion is insufficient evidence that a change is correct. RepoPilot separates observations, desired behavior, proposals, and verification. It preserves scanner/agent provenance and requires a regression test to fail before a fix and pass afterward before marking a proposal safe to apply.
+
+## Features
+
+- Public GitHub PR metadata, paginated changed files, patches, and immutable head snapshots.
+- Bounded repository context: README, directly imported local files, and justified nearby module files.
+- Structured repository-aware AI findings and bounded Bug, Security, and Performance specialist reviews.
+- Bandit and optional Semgrep with committed local rules; normalized findings and conservative deduplication.
+- Evidence-grounded behavioral contracts; minimal pytest proposals and local function-level fix proposals.
+- Deterministic verification independent of OpenAI: syntax, restricted AST, compatibility, before/after pytest and scanners.
+- Read-only GitHub previews. Backend write operations remain separately gated; no frontend publish/apply action.
+- Structured metadata logs, request IDs/timing, health checks, container definitions, and deterministic CI.
+- A reproducible, scan-only synthetic benchmark with measured source-specific results.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  PR[GitHub PR head SHA] --> C[Bounded repository context]
+  C --> AI[AI / specialist reviews]
+  C --> S[Bandit / local Semgrep]
+  AI --> E[Findings with evidence]
+  S --> E
+  E --> B[Behavioral contract]
+  B --> T[Regression test proposal]
+  B --> F[Minimal fix proposal]
+  T --> V[Deterministic verification]
+  F --> V
+  V --> P[Read-only GitHub preview]
+```
+
+Responsibilities are separate backend modules: `github`, `context`, `review`, `static_analysis`, `pipeline`, `contracts`, `test_generation`, `fix_generation`, `verification`, `agents`, and `github_actions`. `api_models` owns request schemas; `main` orchestrates routes; `config` owns non-secret settings; `observability` logs allowlisted metadata.
+
+`/api/v1` aliases share the existing handlers/models. Original paths remain compatible. Main endpoints:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | API readiness |
+| `POST /analyze` | Read real PR metadata/files |
+| `POST /review` | Context-aware AI + static findings |
+| `POST /generate-tests` | Desired-behavior regression proposals |
+| `POST /generate-fixes` | Minimal fix proposals; reuse supplied test artifacts |
+| `POST /verify-fix` | Deterministic verification of supplied artifacts; zero OpenAI calls |
+| `POST /verify-fixes` | Legacy orchestration, including AI generation |
+| `POST /agent-review` | Bounded coordinated specialist pipeline |
+| `POST /github/preview-review` | Dry-run review payload |
+| `POST /github/preview-fix-pr` | Dry-run verified fix/draft-PR plan |
+
+All POST retrieval/review actions use `{ "repository": "owner/repo", "pull_request": 1 }`. Direct verification additionally requires the immutable `head_sha`, `finding`, `validated_fix`, and optional `validated_test`. The UI submits existing artifacts. Stale or mismatched artifacts are rejected. Preview routes use an agent `review_id` and optional `finding_id`. Sessions expire after ten minutes and disappear on restart.
+
+## Safety Design
+
+- Read-only default. Preview routes never write. Separate write routes require **both** `GITHUB_WRITE_ENABLED=true` and explicit `confirm_write=true`. Compose and CI force writes off. No merge operation exists.
+- Desired behavior must be supported by quoted repository documentation or existing tests and high confidence. Inference alone is ambiguous. Test and fix stages share the same unchanged contract; verification never rewrites tests to accommodate a fix.
+- Python AST syntax validation and explicit execution allowlists reject process/shell execution, dynamic code, reflection, unsafe imports, filesystem mutation and network calls. Fixes are small exact replacements and preserve function signatures.
+- Verification uses disposable `tempfile` workspaces containing only bounded necessary files. An OS sandbox denies network and outside writes. Reviewed source is never executed in the real repository.
+- **Execution currently requires macOS `sandbox-exec`. Linux/Docker verification skips, rather than falling back to unrestricted execution.** No Docker execution sandbox is implemented.
+- Trusted pytest, Bandit and Semgrep invocations use fixed commands, sanitized environments, timeouts, bounded output and process cleanup. Generated shell commands are never run.
+- `safe_to_apply=true` requires an unambiguous compatible contract, valid syntax, safe test/source, a genuine before-fix test failure followed by after-fix success, successful required scans, and no new severe scanner findings. Syntax alone never approves a fix.
+- Limits: up to 20 changed files; 8 context files; 24 KB/file; 80,000 context characters. Scanner timeout 15s, capped input/output. Verification up to 5 fixes/tests, 32 workspace files, 256 KB workspace, 10s test wall time and OS resource limits. AI input/output budgets are bounded per stage.
+- Logs contain event names, counts, status, route templates and duration; not patches, environment dumps, credentials or exception text. Third-party HTTP debug logging is suppressed. Request errors omit echoed input; unexpected errors return a generic 500.
+
+These gates reduce risk; they do not establish a general-purpose secure sandbox or prove arbitrary code correct.
+
+## Tech Stack
+
+Python 3.10+, FastAPI, Pydantic, httpx, official OpenAI Python SDK, pytest, Bandit, optional Semgrep; Next.js App Router, TypeScript, React; Docker Compose and GitHub Actions. No database.
+
+## Local Setup
+
+Use Python 3.10+ and Node.js 22. From this repository root, in terminal 1:
 
 ```sh
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-read -rs 'OPENAI_API_KEY?OpenAI API key: '
+export GITHUB_WRITE_ENABLED=false
+export OPENAI_MODEL=gpt-4.1-mini-2025-04-14
+read -s 'OPENAI_API_KEY?OpenAI API key: '; echo
 export OPENAI_API_KEY
-python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+uvicorn main:app --reload --host 127.0.0.1 --port 8000 --no-access-log
 ```
 
-API: http://localhost:8000 · Interactive docs: http://localhost:8000/docs
+The hidden-input command is for macOS zsh. Bash equivalent: `read -s -p 'OpenAI API key: ' OPENAI_API_KEY; echo; export OPENAI_API_KEY`. Enter the key locally; never paste it into source or documentation. AI is optional for fetching PRs and deterministic artifact verification.
 
-### Frontend (terminal 2)
+Terminal 2, from the repository root:
 
 ```sh
 cd frontend
 npm ci
-npm run dev -- --hostname 127.0.0.1 --port 3000
+npm run dev -- --hostname 127.0.0.1
 ```
 
-Open http://localhost:3000.
+Open <http://localhost:3000>; API docs: <http://127.0.0.1:8000/docs>. Public repository reads need no GitHub token.
 
-## Test Dahlia00/repopilot PR #1
+### Optional Semgrep installation
 
-1. Start both services using the commands above.
-2. Enter **Dahlia00/repopilot** in GitHub repository.
-3. Enter **1** in Pull Request number.
-4. Click **Fetch Pull Request**.
-5. Confirm the live PR title, number, author, open/closed state, source → target branches, changed file count, additions, and deletions appear.
-6. Expand each changed file to see GitHub's patch. If GitHub omitted a patch, the UI says so.
-7. Click **Analyze with AI**. This re-fetches the PR, reads full changed files at its head commit, selects repository context, and sends bounded review inputs to OpenAI.
-8. Wait for findings with severity, category, file/line, title, explanation, suggested fix, confidence, and summary counts.
-9. Check the combined summary (**AI findings**, **Static findings**, **Unique issues**) and **Static analysis** section. Bandit should scan the full Python sample; scanner findings are generated by the tools, never hardcoded. The optional Semgrep status says `unavailable` until installed.
-10. Check **Repository context** below the findings: it shows the head commit, number of context files actually used, their paths, selection reasons, coverage notes, and skipped changed-file reasons. For PR #1, expect the root `README.md` as context; the sample currently has no local imports.
-
-11. Click **Generate tests** after a review. This refreshes the AI findings/context before generating proposals; it does not reuse browser-supplied findings or stale code.
-12. Inspect **Generated tests**, the related finding, purpose, expected behavior, validation badge, rejected reasons, and expandable code. The head commit identifies the refreshed review. Nothing is executed, saved, committed, or posted to GitHub.
-
-13. Click **Generate fix proposals**. This performs a fresh review and static scan, generates eligible test evidence, and proposes small Python fixes.
-14. Inspect **Proposed fixes**: related finding/source, confidence, validation badge, original/proposed code, server-generated unified diff, and rejected/skipped reasons. There is no Apply button. SQL fixes may be declined when the database API or contract is unknown.
-
-15. Click **Verify this fix** on an existing proposed-fix card. This sends the exact existing proposal, finding, head SHA and related generated test to `/verify-fix`. Verification does not call OpenAI or regenerate artifacts.
-16. Inspect **Fix verification**: exact proposal checked, syntax result, generated test before the fix, regression test after the fix, Bandit/Semgrep before → after, PASSED/FAILED/SKIPPED counts, and safe-to-apply YES/NO. Missing tests, unsafe source, unsupported OS isolation, scanner errors, or failing tests prevent approval.
-
-For the intentionally unsafe `samples/insecure_example.py`, inspect whether the model reports SQL injection in `get_user()` and unsafe empty-list indexing in `first_result()`. These are expected review targets, not hardcoded findings or guaranteed outputs. Model results may vary. If the PR changes, the reviewed code also changes.
-
-You can also test the backend directly:
+Use a separate environment to avoid Semgrep/OpenTelemetry dependency conflicts with FastAPI:
 
 ```sh
-curl http://localhost:8000/health
-# {"status":"ok","service":"RepoPilot API"}
-
-curl -X POST http://localhost:8000/analyze \
-  -H 'Content-Type: application/json' \
-  -d '{"repository":"Dahlia00/repopilot","pull_request":1}'
-
-# Real AI review (requires the backend API key):
-curl -X POST http://localhost:8000/review \
-  -H 'Content-Type: application/json' \
-  -d '{"repository":"Dahlia00/repopilot","pull_request":1}'
+python3 -m venv /tmp/repopilot-semgrep
+/tmp/repopilot-semgrep/bin/python -m pip install semgrep==1.180.0
+export PATH="/tmp/repopilot-semgrep/bin:$PATH"
 ```
 
-The target must exist and be accessible on GitHub. No fallback or mock findings are returned.
+Export this PATH before starting the backend or benchmark. Missing Semgrep is reported as unavailable; Bandit is included in backend requirements. Rules are local `backend/semgrep-rules.yml`; no remote rule registry or automatic fixes.
 
-## Configure OPENAI_API_KEY locally
+## Environment Variables
 
-The OpenAI SDK reads the key only from the backend's **OPENAI_API_KEY** environment variable. The app never includes it in responses or logs. Never put it in frontend code, a `NEXT_PUBLIC_` variable, a committed file, or documentation.
+Copy `.env.example` to `.env` if useful. Values are placeholders. The backend reads **exported environment variables**, not dotenv files automatically. Compose reads `.env` for interpolation; keep it local and ignored. Never put credentials in `NEXT_PUBLIC_*` variables.
 
-In the same zsh terminal where you will start the backend, enter your existing OpenAI API key at the hidden prompt:
+| Variable | Default / purpose |
+|---|---|
+| `OPENAI_API_KEY` | Empty; required only by AI generation/review |
+| `GITHUB_TOKEN` | Empty; optional authenticated reads/higher GitHub limits |
+| `GITHUB_WRITE_ENABLED` | `false`; independent backend write gate |
+| `OPENAI_MODEL` | `gpt-4.1-mini-2025-04-14`; model must support structured output |
+| `ALLOWED_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000`; comma-separated explicit origins |
+| `LOG_LEVEL` | `INFO`; structured application logging level |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000`; frontend browser API URL, baked at build time |
+
+`.env`, `.env.*` except `.env.example`, keys, PEM files and `secrets/` are ignored. Existing caches are process-local; use one backend worker.
+
+## Running Tests
+
+From the root, without an API key:
 
 ```sh
-read -rs 'OPENAI_API_KEY?OpenAI API key: '
-export OPENAI_API_KEY
-```
-
-Then start or restart Uvicorn. The hidden prompt avoids putting the key in shell history. Your OpenAI API project must have billing/quota and access to the configured model. See the [official OpenAI quickstart](https://developers.openai.com/api/docs/quickstart).
-
-The normal run command does not load `.env`. If you prefer an environment file, manually create `backend/.env` containing `OPENAI_API_KEY=your_existing_key`, install `python-dotenv`, and start Uvicorn with `--env-file .env` as described below. This loads the variable into the process environment. `.env` is already ignored by Git; RepoPilot creates no secret file.
-
-Without this variable, **Fetch Pull Request** still works. **Analyze with AI** returns an actionable configuration error. To remove the variable from the current shell, run `unset OPENAI_API_KEY` and restart without an env file.
-
-## How AI review works
-
-- `/analyze` remains a GitHub-only retrieval endpoint.
-- `/review` retrieves the real PR, builds a bounded snapshot through `backend/context.py`, and delegates AI analysis to `backend/review.py`.
-- Each reviewable changed file is sent with its filename, patch, **full head-commit content**, and selected repository context in a separate official `AsyncOpenAI` SDK request. A file is never reviewed using only its patch if full content is unavailable. Removed, unsupported, oversized, or over-budget files are explicitly skipped; reasons are returned.
-- The fixed model is `gpt-4.1-mini-2025-04-14`. Instructions require reviewing every changed line, hunk, and function for bugs, security vulnerabilities, edge cases, error handling, performance, and code quality, including assumptions about collections, null/empty values, indexing, and input validation. The model must continue after finding a prominent issue and return independent root causes as separate findings, up to **10 findings per changed file**, without padding the count. The standalone `/review` endpoint uses no tool-using agent orchestration. Patches are treated as untrusted content, not instructions.
-- The Responses API uses a strict Pydantic structured-output schema. The backend validates severity/category, confidence from 0–100, file identity, and line numbers against the full changed file. The prompt prefers changed-line locations and requires explaining any PR connection for affected surrounding code. Unknown locations use `line: null`. See [official OpenAI Structured Outputs guidance](https://developers.openai.com/api/docs/guides/structured-outputs) and the [model documentation](https://developers.openai.com/api/docs/models/gpt-4.1-mini).
-- Results are sorted by severity. Empty findings are valid; no findings are synthesized or substituted when a review fails. The response includes `reviewed_files`, `skipped_files`, and `model` alongside PR information and `findings`.
-- The prompt distinguishes PR changes from surrounding source and repository context, using context for imports, function calls, data flow, and assumptions. It rejects unrelated pre-existing issues. Missing patches or excluded full files limit coverage. Check recommendations before acting on them. AI requests consume your OpenAI API quota; clicking AI review again makes new requests.
-- OpenAI requests set `store=False`, use a 60-second HTTP timeout, disable automatic retries, and limit output to 6,000 tokens per file. PR retrieval and context retrieval each have a 45-second overall limit; the AI phase then has a five-minute limit. Provider failures return errors rather than partial findings. Static scanning adds at most 15 seconds per scanner before AI review. The frontend waits up to eight minutes.
-
-Each finding includes `severity` (CRITICAL/HIGH/MEDIUM/LOW), `category` (Security/Bug/Performance/Error Handling/Code Quality), `file`, nullable `line`, `title`, `explanation`, `suggested_fix`, and `confidence` (0–100). All findings come from the model response; offline tests use mock API responses solely to verify the integration.
-
-## Repository context selection
-
-All full file contents and context come from the **PR head repository and immutable head commit SHA**, including fork PRs. The backend requests a bounded Git tree index (metadata, not an archive or clone), then reads only selected Git blobs. If a changed file is absent from a truncated tree index, it tries the Contents API with `ref=head_sha`. API URLs stay on GitHub; blob IDs and file paths are validated. There is no recursive dependency crawl and no repository write.
-
-Selection is deterministic, in this priority order:
-
-1. Root `README.md`, matched case-insensitively, for project purpose and conventions.
-2. Direct local imports discovered in the **full changed file**, including imports outside the diff. Python uses AST parsing for `import` and `from`, resolves relative imports and package `__init__.py`, and checks the changed-file directory, repository root, and `src`. JavaScript/TypeScript tokenizes strings/comments and resolves relative `import`, `export ... from`, `require`, and literal dynamic imports to files or `index` modules; `.js` specifiers can resolve to `.ts`/`.tsx`.
-3. Same-directory `README.md` plus Python `__init__.py` or JS/TS `index` files, justified as module documentation or entry points. Other neighbors are not selected arbitrarily.
-
-Candidates are deduplicated and tagged with a reason. Imported context files do not trigger further dependency expansion. External packages, computed imports, and custom TS path aliases are not resolved in this milestone. Python import discovery is best effort for syntax supported by the backend's Python version. Context shared across changed files can be reused without another download.
-
-The review response includes **only context actually sent to the model**, with `path`, `reason`, and `used_for` changed-file paths. If a context file is omitted from a model request to respect the input budget, it is not claimed as used for that file. Root README may be absent; review still works with available full changed files.
-
-## Safety and size limits
-
-These fixed limits live in `backend/context.py`:
-
-| Limit | Maximum |
-| --- | --- |
-| Changed-file retrieval attempts | 20 per review |
-| Context candidates inspected | 24 per review |
-| Direct import matches | 20 per changed file |
-| Additional context files selected | 8 per review |
-| Full text file size | 24,000 UTF-8 bytes per file |
-| Patch size | 24,000 characters per changed file |
-| Combined source content and patches | 80,000 characters per review |
-| Model input per request | 60,000 characters |
-| Cumulative model input across requests | 200,000 characters per review |
-| Git tree entries inspected | 10,000 |
-| Streamed Git tree response | 2,000,000 bytes |
-| Streamed file response | 64,000 bytes |
-
-Model input counts include the serialized filename/patch/full-content/context payload, instructions, and a conservative allowance for the structured-output schema. These are character budgets, not token estimates. Each file still has a maximum of 10 findings and 6,000 output tokens.
-
-Only allowlisted text extensions are eligible. Dependencies (`node_modules`, `vendor`, virtual environments), `.git`, build/dist/Next output, caches, coverage, generated directories, declaration files (`.d.ts`), minified assets, source maps, lockfiles, images, unsupported extensions, symlinks, and submodules are excluded. NUL/control bytes, non-UTF-8 data, and generated-file headers in the first five lines are also rejected. `.env` and key/certificate extensions are not eligible.
-
-Full files are never silently truncated. If a changed file cannot fit, it is skipped with a reason rather than falling back to patch-only review. Context omissions and truncated tree discovery produce coverage notes. An over-limit tree response returns HTTP 413; GitHub transport, API, and rate-limit failures retain actionable errors. Optional missing files return skip notes. These are conservative selection heuristics, not complete repository understanding.
-
-GitHub itself can truncate recursive tree listings, and patches may be partial. See the [Git tree API](https://docs.github.com/en/rest/git/trees#get-a-tree) and [Contents API](https://docs.github.com/en/rest/repos/contents#get-repository-content). PR metadata/diff requests are separate GitHub calls; if a PR is updated during retrieval, re-fetch it to refresh. Full files and selected context remain pinned to the captured commit.
-
-## Review pipeline architecture
-
-```text
-Next.js: Fetch Pull Request → /analyze → PR metadata + changed files
-Next.js: Analyze with AI → /review
-  github.py: PR metadata, diffs, head repository and commit
-  context.py: bounded tree → full changed files → deterministic context selection
-  static_analysis.py: isolated copies of full changed files → Bandit + optional Semgrep
-  review.py: bounded full-content + patch + context inputs → structured OpenAI findings
-  pipeline.py: preserve source evidence → conservative duplicate grouping + summary
-  response: PR data + AI/static findings + scanner statuses + context + combined summary
-```
-
-Internal Pydantic structures distinguish `FullChangedFile` (path, status, patch, full content, skip reason), `ContextFile` (path, content, selection reason), and `RepositoryContext` (repository, commit, changed files, context files, warnings). The frontend keeps AI findings and repository context, adds static findings/scanner statuses, and shows combined counts. This standalone pipeline remains read-only; Milestone 9 adds separate bounded coordination and explicitly gated GitHub actions.
-
-## Static analysis and scanner installation
-
-Static analysis checks source code against deterministic rules without running the code. AI review interprets changes and repository context; scanners apply reproducible security patterns. Neither approach guarantees every bug will be found.
-
-**Bandit** is a required backend dependency (`bandit==1.9.4`). It scans full changed Python files with its standard security plugins, producing JSON findings such as unsafe SQL construction. The service uses the backend interpreter in isolated mode (`python -I -m bandit`), so scanned source cannot shadow the scanner module. See [Bandit's official CLI documentation](https://bandit.readthedocs.io/en/latest/man/bandit.html).
-
-Install or update backend dependencies from the project root:
-
-```sh
-cd backend
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m bandit --version
-```
-
-**Semgrep** is optional and is not added to the backend requirements, to avoid conflicts between its dependencies and FastAPI/OpenAI. The service detects its executable on the backend's `PATH`. Install it in a separate pipx environment (macOS with Homebrew):
-
-```sh
-brew install pipx
-pipx ensurepath
-pipx install semgrep
-```
-
-Open a new terminal after `ensurepath`, confirm `semgrep --version`, activate the backend environment, configure `OPENAI_API_KEY`, and restart Uvicorn. Keep Semgrep separate: Semgrep 1.180.0 pins OpenTelemetry 1.37.x, while the pinned FastAPI release requires OpenTelemetry API 1.44 or newer. Installing both into the backend environment produces a `pip check` conflict; do not force incompatible versions. An alternative isolated installation without pipx, from the project root, is:
-
-```sh
-python3 -m venv /private/tmp/repopilot-semgrep-env
-/private/tmp/repopilot-semgrep-env/bin/python -m pip install semgrep
-export PATH="/private/tmp/repopilot-semgrep-env/bin:$PATH"
-```
-
-The `/private/tmp` environment is temporary; recreate it if your system removes it. Semgrep is optional: an unavailable scanner produces a visible status, not a failed AI review. See the [official Semgrep CLI reference](https://docs.semgrep.dev/cli-reference).
-
-Semgrep uses only the trusted local `backend/semgrep-rules.yml` starter rules for Python dynamic evaluation/shell commands and JavaScript/TypeScript dynamic evaluation. This small rule pack is intentionally limited; it is not a comprehensive Semgrep registry scan. The service never downloads registry rules, uses `semgrep ci`, logs in, posts findings, or enables autofix. Metrics and version checks are disabled. Rules do not match repository names, sample paths, or expected test findings.
-
-## Static scan safety and failure handling
-
-- Only eligible **full changed files** are copied into a temporary directory. Repository context files are not scanned. Unsupported types, missing content, generated/dependency/build paths, binaries, and prior context exclusions are skipped with reasons.
-- Supported extensions: Python `.py`; Semgrep additionally receives `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, and `.tsx`.
-- Limits: **20 files**, **24,000 UTF-8 bytes per file**, **80,000 bytes total**, **15 seconds per scanner**, **1,000,000 stdout bytes**, **64,000 stderr bytes**, and **200 accepted findings per scanner**.
-- Scanners run with argument arrays, no shell, isolated temporary working directories/HOME, and sanitized environments without `OPENAI_API_KEY` or `GITHUB_TOKEN`. No code is executed from the analyzed files. Temporary copies are removed afterward; the repository is never written to. Timeout/output failures stop the scanner and its workers.
-- Bandit `# nosec` and Semgrep suppression comments do not suppress these scans. Semgrep uses one worker, a five-second per-rule timeout, local rules, and explicit no-autofix/no-metrics/no-version-check flags.
-- Reports distinguish `completed`, `partial`, `unavailable`, `skipped`, `error`, and `timeout`. Tool errors/over-limit findings yield partial status when valid results remain; malformed JSON or invalid locations are rejected. Raw stderr/provider output is not returned.
-- Static findings are normalized to source, severity, category, original GitHub file path, nullable line, rule ID, title, and explanation. Bandit severities are preserved; Semgrep INFO/WARNING/ERROR map to LOW/MEDIUM/HIGH. All scanner failures are nonfatal to AI review.
-
-Scanners inspect the full changed file, so static findings can describe pre-existing code. This milestone does not compare scanners against a base-commit baseline. If AI or GitHub retrieval fails, `/review` retains the existing error behavior; no separate scan-only endpoint is added.
-
-## Combining findings
-
-The response keeps the existing `findings` AI array for compatibility and additionally returns `ai_findings` with `source: "AI"`, `static_findings` with `source: "bandit"` or `"semgrep"`, `scanners`, `static_skipped_files`, `combined_issues`, and `summary`.
-
-Grouping only changes the **unique-issue count**, not either source array. Observations from different sources are grouped only when file, known line, normalized category, and recognized issue family (or exact normalized title) match. Missing/different lines and ambiguous matches remain separate. Independent observations from the same source are not collapsed. Each combined issue retains references to all original evidence and uses the highest reported severity; suggestions, confidence, rule IDs, and explanations remain in the source arrays.
-
-For example, if AI and Bandit both identify the same issue at the same line, both reports remain visible, but the unique count includes that issue once. Static outputs are not sent back to OpenAI and never sent to GitHub. `summary` contains `ai_findings`, `static_findings`, and `unique_issues` counts.
-
-## Automated test generation
-
-`POST /generate-tests` accepts the same repository/PR input as `/review`. It retrieves current PR data and immutable head content/context, performs a fresh AI review using the existing review service, then delegates to the dedicated `backend/test_generation.py` module. Static scans are not repeated for generation. There is no database, cache, or trust in client-supplied findings.
-
-Supported findings are **Python Bug and Error Handling** issues with a reliable line identifying a top-level function in a conservatively inspected module. The source module must contain simple function definitions/docstrings without imports, decorators, defaults, import-time annotations, top-level executable statements, external calls, or unsupported constructs. This intentionally excludes many legitimate but complex files until execution isolation is added.
-
-For eligible findings, the model receives the finding, exact target module/function, full changed-file content, patch, and available context used in the review. It proposes a minimal pytest test or declines with a reason. Tests must encode evidence-bound desired post-fix behavior for deterministic validation failures and boundary inputs. Undocumented behavior is marked ambiguous; characterization tests of current bugs are not generated as regression tests. Up to five findings are attempted. Security, performance, code-quality, non-Python, missing-source/line, and unsupported-source findings are reported as skipped rather than forced into tests.
-
-Each proposal contains `finding_id`, `file`, `framework: "pytest"`, `test_name`, `test_code`, `purpose`, `expected_behavior`, and `execution_safe`. The backend adds the related finding title and validation errors. IDs are derived from the refreshed finding; proposals are validated against its exact ID/path. The response includes the reviewed findings, captured head SHA, tests, skipped findings, and total/safe/rejected test counts. Unsupported findings and model declines are skipped, not counted as rejected code proposals.
-
-### Syntax and safety checks
-
-- Structured JSON must match the Pydantic proposal schema. Malformed/incomplete responses return HTTP 502; API authentication, quota, and timeout errors remain actionable.
-- Python `ast.parse` validates syntax without importing or executing the proposal. Code is limited to 6,000 characters and 500 AST nodes.
-- Exactly one matching `test_...` function is required, with an import of only the exact reviewed function and optional pytest. Aliases cannot shadow protected/dangerous names. The test must call its target and use assertions or a `with pytest.raises(...)` context with a supported built-in exception.
-- An AST allowlist rejects process, network, filesystem, and arbitrary external imports/calls; `subprocess`, `os.system`, destructive filesystem operations, network requests, `eval`/`exec`, dynamic imports, reflection/dunder access, protected-name rebinding, suspicious shell-command strings, decorators, fixtures, loops, async code, classes, and nested functions are refused. Attribute access is restricted to `pytest.raises`.
-- The server calculates the final `execution_safe` flag; a model claiming safety cannot override validation failures. A model marking its own proposal unsafe also results in rejection. Rejected code is returned only as inert text for inspection.
-- **Safe means passed static checks, not guaranteed safe or correct to execute.** Source imports can have effects outside what static checks can prove; no code is run in this milestone, and a human must review proposals before any future manual execution. There is no Run button, sandbox, subprocess execution of tests, filesystem persistence, GitHub write, generated fix, or agent.
-
-Generation inputs are limited to 60,000 characters per request and 120,000 cumulative characters, including instructions and a schema allowance. Context is omitted when needed to fit; full changed-file content is never silently cut. Generation has a 120-second phase limit after the existing PR/context/review phases, a 3,000-output-token limit per model call, and a ten-minute frontend timeout.
-
-### Test PR #1
-
-Keep the backend running with `OPENAI_API_KEY` set. At http://localhost:3000, enter **Dahlia00/repopilot** and **1**, click **Fetch Pull Request**, then **Analyze with AI**, then **Generate tests**.
-
-If the refreshed AI review identifies empty-collection indexing, the generator proposes a regression test only when repository documentation or existing tests establish the desired behavior. Otherwise it records an ambiguous contract and skips regression generation. SQL-injection/security findings are skipped by the eligibility filter. The system does not create an indexing finding if the model misses it, nor hardcode a sample-specific test. Model results may vary; zero proposals with explicit skip reasons is valid.
-
-Direct API test:
-
-```sh
-curl -X POST http://localhost:8000/generate-tests \
-  -H 'Content-Type: application/json' \
-  -d '{"repository":"Dahlia00/repopilot","pull_request":1}'
-```
-
-No pytest installation is required for the generation-only endpoint. Milestone 8 installs pytest for explicit isolated verification. Generated code is never saved in the analyzed repository or added to its test suite; generation validation tests use inert synthetic strings and mocked model responses.
-
-## Milestone 6 architecture
-
-```text
-Fetch Pull Request → /analyze → GitHub metadata + patches
-Analyze with AI → /review → head content/context → static scanners + AI → combined findings
-Generate tests → /generate-tests
-  github.py + context.py: current PR snapshot and bounded repository context
-  review.py: refreshed structured AI findings
-  test_generation.py: eligibility → model proposal → AST syntax/safety validation
-  response: identified findings + accepted/rejected proposals + skipped reasons + counts
-Next.js: render expandable proposals as text; no test execution or persistence
-```
-
-## Optional GitHub token
-
-No token is required for public repositories. To increase API limits, set an existing token in the backend's **GITHUB_TOKEN** environment variable. Tokens stay on the backend and are never returned to the browser. Do not use a `NEXT_PUBLIC_` variable for this token.
-
-To enter an existing token without writing it to shell history, before starting the backend (zsh on macOS):
-
-```sh
-read -rs 'GITHUB_TOKEN?GitHub token: '
-export GITHUB_TOKEN
-```
-
-Alternatively, put `GITHUB_TOKEN=your_existing_token` in `backend/.env` and start Uvicorn with its env-file support:
-
-```sh
-python -m pip install python-dotenv
-python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000 --env-file .env
-```
-
-The default start command does not load `.env`. `.env` and `.env.local` are already ignored by Git. No secret file is created by this project. To return to token-free requests, run `unset GITHUB_TOKEN` and restart the backend without `--env-file`.
-
-The frontend defaults to `http://localhost:8000`. To change it, set `NEXT_PUBLIC_API_URL` in `frontend/.env.local` and restart the frontend. CORS allows `http://localhost:3000` and `http://127.0.0.1:3000`.
-
-## API response
-
-`POST /analyze` accepts `repository` in `owner/repo` format and a positive integer `pull_request`.
-
-It returns:
-
-- `repository`, `pull_request`, `title`, `state`, `author`
-- `base_branch`, `head_branch`, `head_repository`, `head_sha`, `changed_files`, `additions`, `deletions`
-- `files`: objects with `filename`, `status`, `additions`, `deletions`, and `patch` (null when GitHub omits it)
-- `files_truncated`: whether fewer files were retrieved than the PR metadata reports
-
-The backend requests `/repos/{owner}/{repo}/pulls/{number}` and `/repos/{owner}/{repo}/pulls/{number}/files`, paginating at 100 files per page. GitHub caps this endpoint at 3,000 files; GitHub patches may be absent or partial, so they are displayed as returned. If the PR changes during retrieval, metadata and files can differ; re-fetch to refresh. See [GitHub pull request API documentation](https://docs.github.com/en/rest/pulls/pulls#list-pull-requests-files).
-
-`POST /review` accepts the same input and additionally returns `findings`, `reviewed_files`, `skipped_files`, `model`, `repository_context` (path/reason/used_for metadata, not context contents), `context_warnings`, `skipped_file_details` (path/reason), and `input_characters` (conservative input budget used). Milestone 5 adds the source-tagged arrays, scanner reports, evidence groups, and summary described above.
-
-Errors use FastAPI's `detail` field:
-
-- **413**: repository tree response exceeds the context safety limit
-- **422**: invalid repository format or PR number
-- **404**: repository not found/inaccessible, or PR not found (a repository lookup distinguishes these)
-- **429**: GitHub rate limit (includes `Retry-After`), or OpenAI rate limit/quota
-- **502**: GitHub or OpenAI connection/API errors, rejected credentials, malformed model JSON, unsupported file/line references or invalid repository context data, model refusal, or incomplete output
-- **503**: missing backend `OPENAI_API_KEY` for `/review`
-- **504**: GitHub timeout (10-second HTTP timeout; 45-second overall retrieval limit), or OpenAI timeout
-
-GitHub also returns 404 for private repositories the caller cannot access, so the backend cannot prove that such a repository does not exist. See [GitHub API troubleshooting](https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api).
-
-## AI Auto-Fix proposals (Milestone 7)
-
-`POST /generate-fixes` accepts `{"repository":"Dahlia00/repopilot","pull_request":1}`. It retrieves the current PR and immutable head snapshot/context, runs existing static scanners and AI review, groups duplicate evidence using the existing pipeline, then generates fresh eligible pytest proposals. The dedicated `backend/fix_generation.py` service receives each combined issue's AI/Bandit/Semgrep evidence, patch, full changed source, selected repository context, and accepted unexecuted test proposals for that file at the same commit. Tests are evidence only; a test characterizing a bug does not define the desired fixed behavior. This independent request incurs additional OpenAI calls; it does not trust browser-supplied findings or reuse a potentially stale browser review.
-
-The model proposes an exact function replacement or declines with a reason. It prefers small local changes and preserves signatures and unrelated behavior. Currently only located, undecorated, top-level Python functions are supported. Other languages, unavailable source, missing line locations, and oversized functions are skipped. Security fixes are attempted from evidence, but the model is instructed to decline when required database APIs or behavior are unclear. No fixes, SQL samples, or empty-list handling are hardcoded into application logic.
-
-Each proposal includes `finding_id`, `file`, `title`, `explanation`, `original_code`, `fixed_code`, `unified_diff`, `confidence`, and `safe_to_verify`, plus related finding/source metadata and validation errors. IDs identify combined review issues. The response includes the immutable `head_sha`, generated/safe/rejected counts, skipped reasons, and the number of test-evidence inclusions across model requests.
-
-### Syntax and safety validation
-
-The original snippet must exactly match the source function. The replacement must contain exactly that one function with an unchanged name/signature and no decorators. Python AST validates both the snippet and the reconstructed full file. No imports, execution, compilation to bytecode, or persistence of the generated source occur. The server computes a unified diff from the reviewed file and its in-memory replacement; the model cannot supply an arbitrary patch. Wrong file/finding IDs, unchanged proposals, invalid syntax, newly introduced tuple return contracts, and model-marked unsafe proposals are rejected. The prompt also requires a known database API/caller contract before proposing query parameterization; it must not invent placeholder styles or a new return interface.
-
-AST checks reject newly introduced imports, nested functions/classes, async/global changes, reflection, callable/import rebinding, and attribute mutation. New calls are restricted to a conservative set of pure builtins and standard exceptions; existing calls can remain for local fixes, but new or modified dangerous calls are rejected, including known imported aliases. Checks cover subprocess/shell execution, eval/exec, dynamic execution, filesystem writes/deletion, network modules, suspicious shell strings, credential assignments, and recognizable secret formats. This conservative approach can reject a valid fix requiring an unfamiliar external API; the proposal is displayed as rejected rather than applied.
-
-`safe_to_verify` means static checks passed, **not** proof of correctness, absence of secrets, or safety to execute. Static validation cannot resolve every indirect call or certify existing module side effects. Human review remains necessary. The generation endpoints do not apply or run proposals/tests, commit, push, comment, or create PRs. Only the explicit Milestone 8 verification endpoint can execute eligible code/tests inside its restricted temporary sandbox. The generation endpoints add no database, autonomous agents, or Docker execution.
-
-Limits: up to five combined issues, 4,000 characters per original/replacement function, 1,000 replacement AST nodes, 60,000 input characters per fix call (including schema/instructions), 120,000 total fix input characters, and 4,000 output tokens per call. Existing repository, scanner, review, and test-generation limits remain in force. Fix generation has a 180-second overall limit after review/test evidence; the frontend permits up to 13 minutes for the full request. API errors and malformed/incomplete JSON return useful sanitized errors. Rejected proposals remain inspectable; declined/unsupported findings have explicit reasons.
-
-### Milestone 7 architecture
-
-```text
-POST /generate-fixes
-  GitHub PR + immutable head source/context
-  Bandit / optional Semgrep + repository-aware AI review
-  pipeline.py: combined issues with retained source evidence
-  test_generation.py: bounded eligible test proposals (never executed)
-  fix_generation.py: local model replacements → AST/safety validation → computed diffs
-  frontend: proposed fixes, before/after, diff, safe/rejected/skipped counts
-```
-
-After restarting the backend with `OPENAI_API_KEY` configured, test directly:
-
-```sh
-curl --max-time 780 -X POST http://127.0.0.1:8000/generate-fixes \
-  -H 'Content-Type: application/json' \
-  -d '{"repository":"Dahlia00/repopilot","pull_request":1}'
-```
-
-Inspect proposals for empty-list handling and any justified SQL fix or explicit context-based decline. Model output can vary; checks do not require a predetermined fix. Use the frontend steps above to inspect each proposal without executing it.
-
-## Fix verification (Milestone 8)
-
-`POST /verify-fix` is the primary deterministic verification endpoint. It accepts existing finding/fix/test artifacts and their head SHA, checks the current PR metadata against that SHA, retrieves the selected changed file from GitHub, and delegates to `backend/verification.py`. It has no OpenAI client dependency, makes zero OpenAI calls, and works without `OPENAI_API_KEY`. The core `verify_one` function already accepts repository metadata/full source plus validated fix/test data and performs no AI generation. For trusted internal callers with an immutable snapshot, the core requires no GitHub call either. The older `/verify-fixes` endpoint remains an optional generation-and-verification orchestrator; it still calls OpenAI and is no longer used by the frontend verification action. The direct endpoint treats client safety flags as untrusted, reruns all validation, and uses authoritative GitHub source rather than browser-supplied full-file content. A changed head returns HTTP 409; mismatched files/findings/source return 422. It never runs code from the working RepoPilot checkout. Each fix is verified independently against the original snapshot; combining several fixes is outside this milestone.
-
-### Shared behavioral contracts and compatibility
-
-Test generation extracts a structured behavioral contract in the same model response as the test proposal. It includes finding ID/file/function, current behavior, problem, desired behavior, confidence, source, exact evidence path/quote, concrete literal input/outcome cases, and `behavior_ambiguous`. The desired behavior must quote explicit repository documentation or existing tests verbatim. The backend checks identity, quote presence in retrieved authoritative source, confidence of at least 90, and concrete cases. Python implementation text is not a specification: Python evidence must be a docstring, or matching assertions from an existing test. A finding recommendation, inferred behavior, missing/invalid evidence, low confidence, or missing contract remains ambiguous. No exception type, return value, repository, or function is special-cased.
-
-Generated regression code must assert the desired cases directly (literal equality/identity assertions or an exact `pytest.raises` target call). Unknown behavior produces no regression proposal rather than a characterization test asserting today's bug. Fix generation receives the **same unchanged contract** with test artifacts. It may return a useful assumption-bearing fix for human review when behavior is ambiguous, but such a proposal cannot receive automatic approval.
-
-Each fix carries `compatibility: {compatible, reason, behavior_ambiguous}`. Verification recomputes this metadata and does not trust the submitted result. Before workspace creation or execution, it requires identical test/fix contracts, authoritative evidence, matching test expectations, and matching fixed-code outcomes. A small bounded AST constant-propagation checker supports literal inputs, simple assignments, collection indexing, guards/conditional returns, comparisons, len/bool, and explicit builtin raises. It never compiles/evals/imports generated code. Unsupported semantics fail closed. Cases are deliberately limited to JSON scalars and flat lists of scalars; nested/object inputs or unsupported assertions cannot be auto-approved. Cases that already satisfy the contract before the fix are not regression evidence. This check does not prove arbitrary Python semantics or replace actual sandboxed fail-before/pass-after tests and scanner checks.
-
-Missing contracts on older artifacts are treated as ambiguous; old characterization expectations are never rewritten to match a fix. For PR #1, undocumented empty-input behavior is allowed to remain `safe_to_apply=false`. A synthetic fixture with explicit documented desired behavior exercises the complete fail-before/pass-after sandbox and scanner pipeline without OpenAI. The frontend shows current/desired behavior, evidence source/confidence, ambiguity, and compatibility reasons.
-
-### Isolation and execution gate
-
-For each fix, exact original-source matching, Python AST syntax, signatures, and Milestone 7 safety checks are rerun. Verification has its own explicit AST allowlist: ordinary `if`/`return`, boolean checks, comparisons, simple assignments, safe builtin calls/exceptions, and conditional expressions (`ast.IfExp`) are supported. Both branches of conditional expressions receive the same safety checks. Rejections include structured `safety_violations` with before/after phase, AST node, line, rejected call/name, and safety rule; the summary also displays these details. Imports, attribute access, reflection, external calls, and unsupported constructs remain rejected. Both original and reconstructed full files must pass a stricter execution gate: only plain function definitions/docstrings and restricted pure Python expressions/control flow, no imports, attributes, decorators, annotations/default-expression effects, external calls, or module-level execution. The execution gate also rejects numeric literals above 10,000, range construction, multiplication/exponentiation/percent-formatting/shifts, and potentially expanding variable-to-variable concatenation to reduce allocation risks where portable memory limits are unavailable. Unsupported code is skipped, even if its proposal previously passed static validation.
-
-Only previously accepted tests that refer to a finding in the same function/file and immutable commit are considered. Test syntax/import/call restrictions are rerun using the Milestone 6 validator. Related rejected or dangerous tests are never executed. Test code and expectations are never silently rewritten.
-
-A `TemporaryDirectory` holds separate **before** and **after** workspaces. Only the full target source, selected generated test files, empty package initializers, empty pytest config, and trusted runner/probe/report files are created. The replacement is applied only to the after-copy. Repository tests, actual package initializers, conftest files, dependencies, other modules, and repository configuration are not copied. Source paths are checked for traversal, absolute paths, reserved module names, and excessive nesting. Temporary workspaces are removed on success, failure, cancellation, and timeout.
-
-Execution currently requires **macOS `/usr/bin/sandbox-exec`**. It is deprecated by Apple and may not be available/permitted on every machine. Other platforms or a failed isolation probe return SKIPPED with `safe_to_apply=false`; there is no unsandboxed fallback. The sandbox denies network connections and filesystem writes outside the variant workspace. User-data reads under `/Users` are denied except the trusted Python virtual environment and temporary workspace; system runtime reads and trusted Python launcher operations are permitted. Restricted AST validation is an additional gate, not a general-purpose arbitrary-code sandbox. Backend API keys/tokens and Python/pytest configuration environment variables are never inherited.
-
-The trusted runner invokes pytest with plugin autoload disabled, `--noconftest`, an empty explicit config, a temporary root/confcutdir, plain assertions, bytecode/cache writes disabled, and only explicit generated test files. [Pytest documents plugin autoload controls here](https://docs.pytest.org/en/8.4.x/how-to/plugins.html). A trusted report records collected/passed/failed/error counts; collection/import failures never count as successfully reproducing an issue.
-
-### Tools and limits
-
-Known application code invokes pytest through a hardcoded runner and existing Bandit/Semgrep adapters through fixed argument lists. No command is taken from model output and no shell is invoked. Scanners inspect disposable full-source copies before and after; Semgrep uses the existing local rules and is optional when consistently unavailable. Bandit is required for approval.
-
-Limits: five fixes, five tests per fix, 24 KB source, 32 constructed files including reserved runner/probe/report slots, 256 KB input workspace content, maximum five path components, 1,500 source AST nodes, and existing fix/test size limits. Each subprocess has a 10-second wall timeout, a 5-second CPU limit in the pytest runner, a 256 KB per-file output limit, 64 file descriptors, and core dumps disabled. Captured stdout/stderr are limited to 32 KB each, and temporary absolute paths are redacted. Existing scanner time/output/file limits remain active. CPU/time limits are enforced; a portable hard memory limit is not claimed on macOS. Direct verification has a 100-second core deadline after bounded GitHub retrieval; the frontend allows 210 seconds for that deterministic request. The optional legacy orchestrator retains its six-minute verification deadline after generation. No OpenAI timeout is raised or extended by the direct verification stage. Timeout/cancellation kills active process groups before directory cleanup.
-
-### `safe_to_apply` decision
-
-Approval requires **all** of these:
-
-- Fix/source and related tests pass fresh syntax, identity, snapshot, and execution safety checks.
-- OS isolation succeeds and the related tests genuinely fail before the fix (pytest test failure, not collection error, crash, or timeout).
-- All selected tests pass after the fix with at least one collected test and no errors.
-- Bandit completes successfully before and after. Semgrep completes both scans when available; errors, partial scans, or changing availability prevent approval.
-- No new HIGH/CRITICAL findings are introduced by either scanner. Unchanged source lines are mapped before → after so line shifts do not invent regressions or hide newly introduced severe findings.
-
-Syntax alone never approves a fix. If tests pass both before and after, verification is incomplete and SKIPPED. A characterization test incompatible with an explicit desired contract is rejected before execution; missing contracts are ambiguous and SKIPPED. Actual sandboxed test failures still produce FAILED and `safe_to_apply=false`, never an invented pass. The same checks apply generically to all eligible fixes; no sample-specific outcome is hardcoded. The flag applies only to the exact supplied proposal and head commit included in the verification result, not to other proposals, a combination of fixes, or a future repository state. It is evidence from limited generated tests and configured scanner rules, not proof of every behavior or permission to apply a change.
-
-The response contains each fix title/ID/file, the exact proposal checked, status, syntax check, generated baseline test, fixed regression test, Bandit/Semgrep before and after checks/findings, summary, and `safe_to_apply`, plus verified/passed/failed/skipped counts.
-
-### Milestone 8 architecture
-
-```text
-AI stages (OPENAI_API_KEY required)
-  /review → findings/context
-  /generate-tests → test artifacts
-  /generate-fixes → fix artifacts + matching test_artifacts
-    reuses supplied test_artifacts when repository/PR/head match
-Deterministic stage (no OpenAI API key or calls)
-  /verify-fix: existing head_sha + finding + validated_fix + optional validated_test
-    GitHub: authoritative PR head and selected changed source
-    verification.py: revalidation → temporary before/after sandbox
-    pytest + Bandit / optional Semgrep → structured result
-Frontend: Analyze → Generate tests → Generate fixes → Verify this fix
-```
-
-Install the new pytest dependency and start/restart your backend:
-
-```sh
-cd backend
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-# Configure OPENAI_API_KEY using the hidden prompt documented above.
-python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
-```
-
-Start the frontend with the existing commands, enter `Dahlia00/repopilot` and PR `1`, then **Fetch Pull Request → Analyze with AI → Generate tests → Generate fix proposals → Verify this fix**. Fix generation reuses the generated test response when supplied; its returned `test_artifacts` are retained alongside each fix. Verification reuses those artifacts and cannot trigger review/generation. Generation still needs OpenAI; verification does not. For the empty-list issue, inspect whether generated tests reproduce the bug and actually pass with the proposed contract; a legitimate FAILED/SKIPPED result is expected when evidence is unsuitable. Rejected SQL proposals remain skipped and are not executed.
-
-Direct API check, using saved generation responses rather than generating anything inside verification:
-
-Create `verification-request.json` with these fields (copy values from existing responses):
-
-```text
-repository: owner/repository
-pull_request: PR number
-head_sha: generation response's immutable commit
-finding: fix.finding from /generate-fixes
-validated_fix: selected fix object from /generate-fixes
-validated_test: related test object from test_artifacts.tests, or null
-```
-
-```sh
-curl --max-time 210 -X POST http://127.0.0.1:8000/verify-fix \
-  -H 'Content-Type: application/json' \
-  --data-binary @verification-request.json
-```
-
-The request contains code as data; do not execute the JSON or its code fields. Missing tests produce SKIPPED, and characterization tests can correctly produce FAILED. Previously generated artifacts can be verified while OpenAI is unavailable. No database or server-side artifact cache is introduced; the frontend retains artifacts in memory for the current session.
-
-The verification stage has no Apply button and performs no repository/GitHub writes. Optional Milestone 9 GitHub actions are separate and explicitly gated; no autonomous tool discovery, database, or Docker is added.
-
-## Milestone 9: bounded agents and controlled GitHub actions
-
-RepoPilot now coordinates six fixed roles. These are predefined services, not autonomous tool-using agents. They cannot invent tools, arbitrary commands, GitHub URLs, or action types.
-
-| Role | Responsibility | Implementation |
-| --- | --- | --- |
-| Bug | Correctness, edge cases, null/empty handling, state and error handling | Scoped structured AI review |
-| Security | Injection, auth boundaries, secrets, validation, unsafe APIs/dependencies | Scoped AI review plus retained Bandit/Semgrep evidence |
-| Performance | Repeated work, inefficient loops/calls, memory and scaling | Scoped structured AI review |
-| Test | Testability, desired behavior contracts, regression cases and coverage gaps | Existing Milestone 6 contract-bound generator |
-| Fix | Minimal local changes under shared contracts; human-only proposals when ambiguous | Existing Milestone 7 generator |
-| Verification | Deterministic contract, sandboxed pytest and scanner evidence | Milestone 8; never AI safety guesses |
-
-`POST /agent-review` accepts `{"repository":"Dahlia00/repopilot","pull_request":1}`. GitHub metadata/context and static scans are fetched once. Three specialist review passes share that snapshot (at most two concurrently), each limited to its category and 66,000 cumulative input characters, with existing per-file/output limits. Static evidence is untrusted JSON in the Security input, not an instruction/tool grant. There is no fourth general review call: merged AI evidence feeds Test/Fix once each. Verification uses those exact artifacts without OpenAI. Review-role limits are 180 seconds each; Test/Fix/Verification retain 120/180/360-second stage limits, with a 900-second orchestrator deadline. The frontend allows seventeen minutes for the full Agent Review. Failed roles and skipped files are reported as incomplete coverage; they never imply CLEAN.
-
-Responses contain PR/context metadata, six role outputs, deduplicated/ranked findings, tests/contracts, proposals, deterministic verification, an evidence-derived senior summary, recommended **preview** actions, and `github_writes_performed:false`. Original observations remain in role outputs. Deduplication conservatively groups the same file, known line, normalized category and issue family/title, retaining every agent/tool evidence record. Unknown-location observations remain separate. Ranking uses severity, confidence, then location. Scanner observations are LIKELY rather than a claim of exploitability; LOW suggestions are INFORMATIONAL; uncertain behavior is AMBIGUOUS. CONFIRMED requires deterministic evidence. No role can turn failed/skipped verification into `safe_to_apply=true`.
-
-The **Senior Engineer Review** is deterministic: HIGH/CRITICAL non-informational findings produce advisory CHANGES_REQUESTED; other findings or incomplete coverage produce REVIEW_RECOMMENDED; CLEAN requires no findings and complete coverage. It lists blocking/non-blocking IDs, verified fixes, human-review items and coverage gaps. It cannot invent findings and never submits a GitHub approval or rejection.
-
-### Server-side artifacts
-
-An opaque `review_id` identifies canonical server-held results. This is a process-local bounded store (twenty sessions, ten-minute TTL, maximum six million serialized characters per record), not a database or persistent cache. It is cleared by restart/reload; expired/evicted IDs require a new Agent Review. IDs are bound to repository and PR. Clients cannot supply code, URLs, GitHub bodies/actions, arbitrary branches, or safety flags to automation endpoints. Treat IDs as local session capabilities; the backend remains intended for local use, not a public multi-user service. Public display/actions redact environment keys and recognizable credential/secret formats; fix publication is refused if source/test/diff contains such content.
-
-### GitHub default read-only mode
-
-```sh
-export GITHUB_WRITE_ENABLED=false
-```
-
-This is the default when unset. Preview endpoints always return a dry-run plan, even if write mode is enabled or a caller sends `confirm_write:true`:
-
-```text
-POST /github/preview-review
-POST /github/preview-fix-pr
-```
-
-Bodies contain `repository`, `pull_request`, `review_id`, and optional `finding_id` for a fix preview. Review preview includes a human-review summary and high-confidence inline comments at valid RIGHT-side patch lines. It is always a GitHub COMMENT event, never APPROVE/REQUEST_CHANGES. Fix preview requires a validated compatible proposal and PASSED deterministic verification with `safe_to_apply=true`; otherwise it returns `available:false` and no actions. It shows affected files, exact source/test changes, generated regression test, verification and scanner evidence, and the proposed draft PR. Sequential Git object SHA placeholders explicitly identify outputs of preceding predefined actions.
-
-The frontend shows **READ-ONLY MODE** and **GitHub writes are disabled.** by default. Its buttons call only preview endpoints. There are no publish/merge/apply buttons.
-
-### Optional, explicitly confirmed backend writes
-
-Only these fixed write endpoints exist:
-
-```text
-POST /github/post-review
-POST /github/create-fix-pr
-```
-
-They require **both** `GITHUB_WRITE_ENABLED=true` and strict JSON boolean `confirm_write:true`. If either is absent/false, they return the same dry-run preview and perform zero GitHub requests for writing. A token is required only after both gates pass. No real write is part of the initial Milestone 9 validation.
-
-Configure an existing fine-grained token in the backend terminal without pasting it into chat or a file:
-
-```sh
-read -rs 'GITHUB_TOKEN?GitHub token: '
-export GITHUB_TOKEN
-export GITHUB_WRITE_ENABLED=false
-```
-
-Never put tokens in frontend variables, code, documentation, logs or committed files; `.env` remains ignored. Scope fine-grained tokens to the selected repositories only, including the PR head repository for fork-based fix PRs. Minimum permissions:
-
-| Capability | Repository permissions |
-| --- | --- |
-| Public PR/source read | No token required |
-| Private PR/source read | Pull requests: read; Contents: read |
-| PR summary/inline review COMMENT | Pull requests: write |
-| New branch/tree/commit | Contents: write |
-| Draft fix PR | Pull requests: write, plus Contents: write for its new branch |
-
-See GitHub's official [review permissions](https://docs.github.com/en/rest/pulls/reviews), [Git-tree permissions](https://docs.github.com/en/rest/git/trees), [reference permissions](https://docs.github.com/en/rest/git/refs), and [PR permissions](https://docs.github.com/en/rest/pulls/pulls). No organization-wide/admin permissions, workflow edits, or repository deletion permissions are requested.
-
-Before writes, RepoPilot refetches the open PR and refuses changed SHA/head repository/head branch. Reviews are pinned to that commit. Fix publication reruns deterministic verification with existing artifacts, requires matching test/source, and checks target ref and generated test-path collisions. The target ref is checked again after branch creation, and the draft PR receipt must contain the verified base/head SHAs; detected changes block continuation and require manual remote-state inspection. Only non-executable regular Python source files are supported for publication. It creates an atomic new `repopilot/fix-<finding-id>` ref pointing to a new commit; no existing ref is updated. The draft fix PR targets the original feature head branch in its head repository. Main/master targets are refused conservatively. Duplicate branches, existing test paths, expired artifacts, failed/ambiguous verification, missing tokens, unsafe names, and malformed GitHub responses prevent publication. No client-provided branch is accepted. PR title/body identify RepoPilot and require human review.
-
-Per-session action locks and attempted-write flags block duplicate/blind retries. GitHub object creation is not transactional: an API timeout/failure may leave an orphan tree/commit, a new branch, or an already-created review/PR. The API reports a sanitized failure; inspect remote state manually rather than retrying or deleting anything automatically. GitHub workflows may run when a future explicitly approved branch/PR is created; RepoPilot itself does not run remote workflows or merge anything.
-
-RepoPilot never automatically merges, approves/rejects reviews, pushes main/master, force-pushes, deletes branches, closes PRs, applies arbitrary model actions, or bypasses verification. Preview buttons never cause a write.
-
-### Milestone 9 architecture
-
-```text
-/agent-review (no GitHub writes)
-  GitHub immutable PR/context + one static scan
-  Orchestrator → Bug / Security / Performance (bounded structured AI roles)
-  shared normalized evidence → Test → Fix → deterministic Verification
-  evidence-preserving dedup/ranking → Senior Engineer advisory summary
-  expiring canonical server artifact store → review_id
-Frontend Agent Review dashboard + preview-only GitHub Actions
-  /github/preview-review        → exact COMMENT/inline plan
-  /github/preview-fix-pr        → verified draft fix plan or unavailable reason
-Optional backend execution (not used in initial validation)
-  write switch AND confirm_write AND token
-  canonical artifacts + fresh snapshot + collision checks + verification
-  fixed COMMENT or new branch/draft PR actions only
-```
-
-### Read-only local PR #1 validation
-
-Start the backend with `OPENAI_API_KEY` configured, `GITHUB_WRITE_ENABLED=false`, and existing scanner dependencies, then run the frontend normally. Enter `Dahlia00/repopilot`, PR `1`, Fetch Pull Request, then **Run Agent Review**. Inspect roles, retained static evidence, advisory summary, coverage/ambiguity and verification. Click **Preview review comment** and **Preview verified fix PR** only. An unavailable fix preview is correct when no fix passed deterministic verification.
-
-Direct read-only calls:
-
-```sh
-curl --max-time 1020 -X POST http://127.0.0.1:8000/agent-review \
-  -H 'Content-Type: application/json' \
-  -d '{"repository":"Dahlia00/repopilot","pull_request":1}'
-```
-
-Copy the returned `review_id` into a preview request; do not call write endpoints during first validation:
-
-```sh
-curl -X POST http://127.0.0.1:8000/github/preview-review \
-  -H 'Content-Type: application/json' \
-  -d '{"repository":"Dahlia00/repopilot","pull_request":1,"review_id":"REPLACE_WITH_RETURNED_REVIEW_ID"}'
-```
-
-Use `/github/preview-fix-pr` with the same request and an eligible verified `finding_id`, if any. Without an eligible finding it returns an unavailable dry-run preview. Tests mock every GitHub mutation; no unit test writes remotely.
-
-## Checks
-
-Backend tests exercise GitHub retrieval, repository selection, full-file retrieval, fork/head snapshots, source and model budgets, exclusion rules, context failures, scanner normalization/limits/failures, conservative deduplication, generated-test and fix syntax/safety/identity/budgets, exact source matching, computed diffs, verification isolation/application/cleanup, actual sandboxed pytest execution, timeouts, scanner comparisons, safe-to-apply decisions, endpoint integration, and the real OpenAI SDK parser with mocked HTTP responses. One test exercises the installed Bandit CLI on a synthetic file; other scanner tests mock subprocess outputs. They need no token, API key, internet, or API spend:
-
-```sh
-cd backend
-source .venv/bin/activate
-python -m unittest discover -v
-python -m pip check
-```
-
-Frontend checks:
-
-```sh
+LOG_LEVEL=ERROR backend/.venv/bin/python -m unittest discover -s backend -p 'test_*.py'
+backend/.venv/bin/python -m compileall -q backend
+backend/.venv/bin/python scripts/check_security.py
 cd frontend
 npm run lint
 npm run build
 npm run typecheck
 ```
 
-Run the build before typecheck on a fresh checkout to generate Next.js route types.
+Build precedes typecheck so generated Next route types exist in a clean checkout. Tests mock external APIs; sandbox/scanner tests use deterministic synthetic data. Sandbox-dependent tests skip on unsupported or restricted environments. The macOS CI job exercises the supported sandbox. Bandit’s production check excludes unit fixtures, **not** the `test_generation.py` service, and gates medium/high severity findings. Optional local Semgrep check:
 
-## Structure
+```sh
+semgrep scan --config backend/semgrep-rules.yml --metrics off --disable-version-check --error backend
+```
+
+## Running Benchmark
+
+```sh
+source backend/.venv/bin/activate
+python benchmark/run_benchmark.py
+# Optional real paid AI run; requires exported OPENAI_API_KEY:
+python benchmark/run_benchmark.py --ai
+```
+
+Both commands produce `benchmark/results.json` and `benchmark/RESULTS.md`; optional AI mode replaces the previous results. Preserve a copy first if comparing runs. AI failures do not substitute mock results. Twelve labeled Python/JS/TS fixtures cover security, bugs, performance and safe examples. Fixtures are **never executed**.
+
+Scoring matches expected category and exact source line; severity remains available for inspection. Multiple observations at the same category/location collapse. Additional observations count as false positives; unsupported/error cases remain misses. Per-source scores, raw findings, scanner status, findings/case, versions and average latency are recorded. AI is explicitly `not_run` in static-only results. [Measured results](benchmark/RESULTS.md) are generated from actual outputs. This small synthetic suite does not measure real-world correctness or repository-wide recall.
+
+## Docker
+
+```sh
+docker compose config --quiet
+docker compose build
+docker compose up -d --wait
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:3000/api/health
+docker compose down
+```
+
+Credentials are injected externally; Compose forces `GITHUB_WRITE_ENABLED=false`. Ports bind localhost. Both images use non-root users and health checks; Next.js uses standalone production output. Backend runs one worker. Docker Desktop must be running. Semgrep is optional and not bundled in the backend image; install it separately if customizing the image. Linux execution verification remains **SKIPPED**, while retrieval, review, scans and proposal generation are available. No public deployment is configured.
+
+## CI/CD
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on pull requests and pushes to `main`, with repository read-only permissions and no credentials. It runs macOS backend tests/compilation/Bandit/benchmark, Ubuntu frontend install/lint/build/types, and a separate isolated Semgrep job using only local rules. No deployment or GitHub write step is included. The badge reflects actual GitHub run status; local validation alone does not imply hosted CI has run.
+
+## Project Structure
 
 ```text
-repopilot/
-  backend/
-    main.py
-    github.py
-    context.py
-    test_context.py
-    test_github.py
-    review.py
-    test_generation.py
-    test_test_generation.py
-    fix_generation.py
-    test_fix_generation.py
-    agents.py
-    github_actions.py
-    test_agents.py
-    test_github_actions.py
-    contracts.py
-    test_contracts.py
-    verification.py
-    test_verification.py
-    static_analysis.py
-    pipeline.py
-    semgrep-rules.yml
-    test_static_analysis.py
-    test_pipeline.py
-    test_review.py
-    requirements.txt
-  frontend/
-    app/
-      globals.css
-      layout.tsx
-      page.tsx
-      review-findings.tsx
-      repository-context.tsx
-      static-analysis.tsx
-      generated-tests.tsx
-      proposed-fixes.tsx
-      fix-verification.tsx
-      behavior-contract.tsx
-      agent-dashboard.tsx
-    eslint.config.mjs
-    next-env.d.ts
-    next.config.ts
-    package.json
-    package-lock.json
-    tsconfig.json
-  README.md
+backend/             API, bounded services, safety gates and offline tests
+frontend/app/        Dashboard, evidence views, pipeline overview, health route
+benchmark/cases/     Labeled synthetic scan-only fixtures
+benchmark/           Dataset, runner, actual JSON and Markdown results
+scripts/             Production security check
+.github/workflows/   CI validation
+.env.example         Non-secret configuration template
+docker-compose.yml   Local read-only demo containers
+PORTFOLIO.md         Verified facts, measured metrics and resume bullets
 ```
+
+## Current Limitations
+
+- No authentication, database, durable sessions, distributed jobs or public deployment hardening. This is a local portfolio demonstrator, not an internet-facing production service.
+- macOS-only execution sandbox; verification skips on Linux and Docker. AST constraints intentionally reject many normal but unsupported programs.
+- Small local scanner rules and Python-focused generated tests/fixes. Static scanners miss many semantic/performance issues. Benchmark results quantify this limitation.
+- AI is paid, nondeterministic and may fail or exceed bounded upstream budgets. Agent review is expensive; direct verification is independent of AI.
+- Context selection is bounded and deterministic, not a complete dependency graph. Large/generated/binary files may be skipped.
+- A correct intended behavior often cannot be established automatically. Such findings stay ambiguous and unapproved.
+- Before/after tests and scanners provide evidence, not proof of freedom from regressions. No complete project test suite is downloaded/executed.
+- GitHub write paths have offline mocked tests; this milestone does not perform real writes. Preview IDs expire and must be regenerated after restart.
+
+## Future Work
+
+A properly validated Linux execution sandbox, wider contract evidence and language support, larger independently labeled benchmarks, durable jobs and explicit deployment authentication/rate controls. Any future writes must preserve human confirmation and verification gates.
+
+## Screenshots / Demo
+
+Run the local demo above to inspect the pipeline and evidence panels. No screenshot or recorded deployment is claimed. [PORTFOLIO.md](PORTFOLIO.md) contains measured engineering facts and suggested resume language.
