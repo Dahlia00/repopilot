@@ -12,6 +12,7 @@ from context import build_repository_context
 from static_analysis import run_static_analysis
 from pipeline import PipelineResponse, combine_review
 from test_generation import TestGenerationResponse, generate_tests
+from fix_generation import FixGenerationResponse, generate_fixes
 
 
 class AnalyzeRequest(BaseModel):
@@ -91,3 +92,21 @@ async def generate_test_proposals(
         return await asyncio.wait_for(generate_tests(reviewed, repository, ai_client), timeout=120)
     except asyncio.TimeoutError as exc:
         raise HTTPException(504, 'Review or test generation exceeded its time limit. No generated code was executed.') from exc
+
+
+@app.post('/generate-fixes', response_model=FixGenerationResponse)
+async def generate_fix_proposals(
+    request: AnalyzeRequest,
+    client: httpx.AsyncClient = Depends(get_github_client),
+    ai_client: AsyncOpenAI = Depends(get_openai_client),
+) -> FixGenerationResponse:
+    pr = await analyze(request, client)
+    try:
+        repository = await asyncio.wait_for(build_repository_context(pr, client), timeout=45)
+        static = await run_static_analysis(repository)
+        ai = await asyncio.wait_for(review_patches(pr, ai_client, repository), timeout=300)
+        reviewed = combine_review(ai, static)
+        tests = await asyncio.wait_for(generate_tests(ai, repository, ai_client), timeout=120)
+        return await asyncio.wait_for(generate_fixes(reviewed, repository, tests, ai_client), timeout=180)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(504, 'Review or fix generation exceeded its time limit. No proposal was applied or executed.') from exc

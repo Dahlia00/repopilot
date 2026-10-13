@@ -1,8 +1,8 @@
 # RepoPilot
 
-AI-powered code review and debugging assistant — milestone 6: automated test generation.
+AI-powered code review and debugging assistant — milestone 7: AI Auto-Fix proposal generation.
 
-RepoPilot fetches real GitHub PR metadata and changed files, displays expandable patches, combines repository-aware AI review with local Bandit and optional Semgrep scans, and generates statically validated pytest proposals on request. Public GitHub repositories work without a GitHub token. AI review requires a backend OPENAI_API_KEY. This milestone only reads and analyzes: it does not modify files or the PR, post GitHub comments, or include agents, a database, or Docker.
+RepoPilot fetches real GitHub PR metadata and changed files, displays expandable patches, combines repository-aware AI review with local Bandit and optional Semgrep scans, and generates statically validated pytest and local code-fix proposals on request. Public GitHub repositories work without a GitHub token. AI review requires a backend OPENAI_API_KEY. This milestone only reads and analyzes: it does not modify files or the PR, post GitHub comments, or include agents, a database, or Docker.
 
 ## Requirements
 
@@ -52,6 +52,9 @@ Open http://localhost:3000.
 
 11. Click **Generate tests** after a review. This refreshes the AI findings/context before generating proposals; it does not reuse browser-supplied findings or stale code.
 12. Inspect **Generated tests**, the related finding, purpose, expected behavior, validation badge, rejected reasons, and expandable code. The head commit identifies the refreshed review. Nothing is executed, saved, committed, or posted to GitHub.
+
+13. Click **Generate fix proposals**. This performs a fresh review and static scan, generates eligible test evidence, and proposes small Python fixes.
+14. Inspect **Proposed fixes**: related finding/source, confidence, validation badge, original/proposed code, server-generated unified diff, and rejected/skipped reasons. There is no Apply button. SQL fixes may be declined when the database API or contract is unknown.
 
 For the intentionally unsafe `samples/insecure_example.py`, inspect whether the model reports SQL injection in `get_user()` and unsafe empty-list indexing in `first_result()`. These are expected review targets, not hardcoded findings or guaranteed outputs. Model results may vary. If the PR changes, the reviewed code also changes.
 
@@ -313,9 +316,49 @@ Errors use FastAPI's `detail` field:
 
 GitHub also returns 404 for private repositories the caller cannot access, so the backend cannot prove that such a repository does not exist. See [GitHub API troubleshooting](https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api).
 
+## AI Auto-Fix proposals (Milestone 7)
+
+`POST /generate-fixes` accepts `{"repository":"Dahlia00/repopilot","pull_request":1}`. It retrieves the current PR and immutable head snapshot/context, runs existing static scanners and AI review, groups duplicate evidence using the existing pipeline, then generates fresh eligible pytest proposals. The dedicated `backend/fix_generation.py` service receives each combined issue's AI/Bandit/Semgrep evidence, patch, full changed source, selected repository context, and accepted unexecuted test proposals for that file at the same commit. Tests are evidence only; a test characterizing a bug does not define the desired fixed behavior. This independent request incurs additional OpenAI calls; it does not trust browser-supplied findings or reuse a potentially stale browser review.
+
+The model proposes an exact function replacement or declines with a reason. It prefers small local changes and preserves signatures and unrelated behavior. Currently only located, undecorated, top-level Python functions are supported. Other languages, unavailable source, missing line locations, and oversized functions are skipped. Security fixes are attempted from evidence, but the model is instructed to decline when required database APIs or behavior are unclear. No fixes, SQL samples, or empty-list handling are hardcoded into application logic.
+
+Each proposal includes `finding_id`, `file`, `title`, `explanation`, `original_code`, `fixed_code`, `unified_diff`, `confidence`, and `safe_to_verify`, plus related finding/source metadata and validation errors. IDs identify combined review issues. The response includes the immutable `head_sha`, generated/safe/rejected counts, skipped reasons, and the number of test-evidence inclusions across model requests.
+
+### Syntax and safety validation
+
+The original snippet must exactly match the source function. The replacement must contain exactly that one function with an unchanged name/signature and no decorators. Python AST validates both the snippet and the reconstructed full file. No imports, execution, compilation to bytecode, or persistence of the generated source occur. The server computes a unified diff from the reviewed file and its in-memory replacement; the model cannot supply an arbitrary patch. Wrong file/finding IDs, unchanged proposals, invalid syntax, newly introduced tuple return contracts, and model-marked unsafe proposals are rejected. The prompt also requires a known database API/caller contract before proposing query parameterization; it must not invent placeholder styles or a new return interface.
+
+AST checks reject newly introduced imports, nested functions/classes, async/global changes, reflection, callable/import rebinding, and attribute mutation. New calls are restricted to a conservative set of pure builtins and standard exceptions; existing calls can remain for local fixes, but new or modified dangerous calls are rejected, including known imported aliases. Checks cover subprocess/shell execution, eval/exec, dynamic execution, filesystem writes/deletion, network modules, suspicious shell strings, credential assignments, and recognizable secret formats. This conservative approach can reject a valid fix requiring an unfamiliar external API; the proposal is displayed as rejected rather than applied.
+
+`safe_to_verify` means static checks passed, **not** proof of correctness, absence of secrets, or safety to execute. Static validation cannot resolve every indirect call or certify existing module side effects. Human review remains necessary. RepoPilot does not apply, run, commit, push, comment, or create PRs for proposals, and does not run generated tests. No database, agents, or Docker execution are added.
+
+Limits: up to five combined issues, 4,000 characters per original/replacement function, 1,000 replacement AST nodes, 60,000 input characters per fix call (including schema/instructions), 120,000 total fix input characters, and 4,000 output tokens per call. Existing repository, scanner, review, and test-generation limits remain in force. Fix generation has a 180-second overall limit after review/test evidence; the frontend permits up to 13 minutes for the full request. API errors and malformed/incomplete JSON return useful sanitized errors. Rejected proposals remain inspectable; declined/unsupported findings have explicit reasons.
+
+### Milestone 7 architecture
+
+```text
+POST /generate-fixes
+  GitHub PR + immutable head source/context
+  Bandit / optional Semgrep + repository-aware AI review
+  pipeline.py: combined issues with retained source evidence
+  test_generation.py: bounded eligible test proposals (never executed)
+  fix_generation.py: local model replacements → AST/safety validation → computed diffs
+  frontend: proposed fixes, before/after, diff, safe/rejected/skipped counts
+```
+
+After restarting the backend with `OPENAI_API_KEY` configured, test directly:
+
+```sh
+curl --max-time 780 -X POST http://127.0.0.1:8000/generate-fixes \
+  -H 'Content-Type: application/json' \
+  -d '{"repository":"Dahlia00/repopilot","pull_request":1}'
+```
+
+Inspect proposals for empty-list handling and any justified SQL fix or explicit context-based decline. Model output can vary; checks do not require a predetermined fix. Use the frontend steps above to inspect each proposal without executing it.
+
 ## Checks
 
-Backend tests exercise GitHub retrieval, repository selection, full-file retrieval, fork/head snapshots, source and model budgets, exclusion rules, context failures, scanner normalization/limits/failures, conservative deduplication, generated-test syntax/safety/identity/budgets, and the real OpenAI SDK parser with mocked HTTP responses. One test exercises the installed Bandit CLI on a synthetic file; other scanner tests mock subprocess outputs. They need no token, API key, internet, or API spend:
+Backend tests exercise GitHub retrieval, repository selection, full-file retrieval, fork/head snapshots, source and model budgets, exclusion rules, context failures, scanner normalization/limits/failures, conservative deduplication, generated-test and fix syntax/safety/identity/budgets, exact source matching, computed diffs, endpoint integration, and the real OpenAI SDK parser with mocked HTTP responses. One test exercises the installed Bandit CLI on a synthetic file; other scanner tests mock subprocess outputs. They need no token, API key, internet, or API spend:
 
 ```sh
 cd backend
@@ -348,6 +391,8 @@ repopilot/
     review.py
     test_generation.py
     test_test_generation.py
+    fix_generation.py
+    test_fix_generation.py
     static_analysis.py
     pipeline.py
     semgrep-rules.yml
@@ -364,6 +409,7 @@ repopilot/
       repository-context.tsx
       static-analysis.tsx
       generated-tests.tsx
+      proposed-fixes.tsx
     eslint.config.mjs
     next-env.d.ts
     next.config.ts

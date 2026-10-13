@@ -1,6 +1,7 @@
 'use client';
 import { useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import ProposedFixes, { type FixGeneration } from './proposed-fixes';
 import GeneratedTests, { type TestGeneration } from './generated-tests';
 import StaticAnalysis, {
   ReviewSummary,
@@ -64,13 +65,18 @@ export default function Home() {
   const [generated, setGenerated] = useState<TestGeneration | null>(null);
   const [generating, setGenerating] = useState(false);
   const [generationError, setGenerationError] = useState('');
-  const busy = loading || reviewing || generating;
+  const [fixes, setFixes] = useState<FixGeneration | null>(null);
+  const [fixing, setFixing] = useState(false);
+  const [fixError, setFixError] = useState('');
+  const busy = loading || reviewing || generating || fixing;
 
   function clearResults() {
     setAnalysis(null);
     setReview(null);
     setError('');
     setReviewError('');
+    setFixes(null);
+    setFixError('');
     setGenerated(null);
     setGenerationError('');
   }
@@ -127,6 +133,8 @@ export default function Home() {
     if (!analysis || busy) return;
     setReview(null);
     setReviewError('');
+    setFixes(null);
+    setFixError('');
     setGenerated(null);
     setGenerationError('');
     setReviewing(true);
@@ -199,6 +207,33 @@ export default function Home() {
       );
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function generateFixProposals() {
+    if (!review || busy) return;
+    setFixes(null);
+    setFixError('');
+    setFixing(true);
+    try {
+      const response = await fetch(`${apiUrl.replace(/\/$/, '')}/generate-fixes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repository: review.repository, pull_request: review.pull_request }),
+        signal: AbortSignal.timeout(780000),
+      });
+      if (!response.ok) {
+        const body: { detail?: unknown } = await response.json().catch(() => ({}));
+        throw new Error(typeof body.detail === 'string' ? body.detail : `Fix generation failed (HTTP ${response.status}).`);
+      }
+      setFixes((await response.json()) as FixGeneration);
+    } catch (err) {
+      setFixError(err instanceof TypeError ? 'Could not connect to RepoPilot API.'
+        : err instanceof Error && ['TimeoutError', 'AbortError'].includes(err.name)
+          ? 'Fix generation timed out. Please try again.'
+          : err instanceof Error ? err.message : 'Fix generation failed.');
+    } finally {
+      setFixing(false);
     }
   }
 
@@ -398,6 +433,12 @@ export default function Home() {
                 Creates proposals from a refreshed review. Code is never run or saved.
               </p>
             </div>
+            <div className="test-generation-action">
+              <button type="button" disabled={busy} onClick={generateFixProposals}>
+                {fixing ? 'Generating fixes…' : 'Generate fix proposals'}
+              </button>
+              <p className="muted small">Refreshes AI and static review, generates test evidence, then proposes local fixes.</p>
+            </div>
             <ReviewSummary summary={review.summary} />
             <ReviewFindings
               findings={review.ai_findings}
@@ -431,8 +472,11 @@ export default function Home() {
           </p>
         )}
         {generated && <GeneratedTests result={generated} />}
+        {fixing && <p className="empty muted" role="status">Refreshing review and test evidence, then validating fix proposals…</p>}
+        {fixError && <p className="error" role="alert">{fixError}</p>}
+        {fixes && <ProposedFixes result={fixes} />}
         <footer>
-          RepoPilot <span>Milestone 06 · Automated test generation</span>
+          RepoPilot <span>Milestone 07 · AI Auto-Fix proposals</span>
         </footer>
       </main>
     </div>

@@ -135,6 +135,55 @@ class ReviewEndpointTests(unittest.TestCase):
         self.assertEqual(payload['target_function'], 'choose')
         self.assertEqual(payload['repository_context'][0]['path'], 'README.md')
 
+    def test_generate_fixes_endpoint_refreshes_review_and_validates_replacement(self):
+        self.full_sources['sample.py'] = 'def choose(values):\n    return values[0]\n'
+        original = self.success
+        def handler(request):
+            body = json.loads(request.content)
+            name = body['text']['format']['name']
+            if name == 'ModelReview':
+                return original(request)
+            payload = json.loads(body['input'])
+            if name == 'ModelProposal':
+                generated = {'proposal': {
+                    'finding_id': payload['finding_id'], 'file': payload['file'], 'framework': 'pytest',
+                    'test_name': 'test_boundary',
+                    'test_code': 'from sample import choose\ndef test_boundary():\n    assert choose([1]) == 1',
+                    'purpose': 'Check singleton input.', 'expected_behavior': 'First value is returned.',
+                    'execution_safe': True,
+                }, 'reason': ''}
+            else:
+                generated = {'proposal': {
+                    'finding_id': payload['finding_id'], 'file': payload['file'],
+                    'title': 'Validate input', 'explanation': 'Reject empty input.',
+                    'original_code': payload['original_code'],
+                    'fixed_code': 'def choose(values):\n    if not values:\n        raise ValueError("Nonempty input required")\n    return values[0]',
+                    'confidence': 90, 'safe_to_verify': True,
+                }, 'reason': ''}
+            return httpx.Response(200, json={'id':'resp_fix','status':'completed','output':[{
+                'type':'message','role':'assistant','content':[{'type':'output_text','text':json.dumps(generated)}]}]})
+        self.ai_handler = handler
+        response = self.client.post('/generate-fixes', json={'repository':'Dahlia00/repopilot','pull_request':1})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['safe_fixes'], 1)
+        self.assertEqual(response.json()['head_sha'], 'a' * 40)
+        self.assertIn('+++ b/sample.py', response.json()['fixes'][0]['unified_diff'])
+        payload = json.loads(json.loads(self.ai_requests[-1].content)['input'])
+        self.assertEqual(payload['repository_context'][0]['path'], 'README.md')
+        self.assertEqual(payload['evidence'][0]['source'], 'AI')
+        self.assertEqual(len(payload['unexecuted_test_proposals']), 1)
+        self.assertEqual(response.json()['test_proposals_used'], 1)
+
+    def test_generate_fixes_missing_key_and_github_failure(self):
+        self.github_error = 404
+        response = self.client.post('/generate-fixes', json={'repository':'Dahlia00/repopilot','pull_request':1})
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.ai_requests, [])
+        del app.dependency_overrides[get_openai_client]
+        with patch.dict(os.environ, {'OPENAI_API_KEY': ''}):
+            response = self.client.post('/generate-fixes', json={'repository':'Dahlia00/repopilot','pull_request':1})
+        self.assertEqual(response.status_code, 503)
+
     def test_generate_tests_missing_key(self):
         del app.dependency_overrides[get_openai_client]
         with patch.dict(os.environ, {'OPENAI_API_KEY': ''}):
