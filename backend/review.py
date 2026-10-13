@@ -129,7 +129,11 @@ def visible_new_lines(patch: str) -> set[int]:
 
 
 async def review_patches(pr: PullRequestResponse, client: AsyncOpenAI,
-                         repository: RepositoryContext) -> ReviewResponse:
+                         repository: RepositoryContext, *, role_instructions: str = '',
+                         input_budget: int | None = None,
+                         static_evidence: list[dict] | None = None) -> ReviewResponse:
+    input_budget = MAX_TOTAL_MODEL_INPUT_CHARS if input_budget is None else min(input_budget, MAX_TOTAL_MODEL_INPUT_CHARS)
+    instructions = INSTRUCTIONS + '\n' + role_instructions if role_instructions else INSTRUCTIONS
     findings: list[Finding] = []
     reviewed_files: list[str] = []
     skipped_files: list[str] = []
@@ -154,12 +158,14 @@ async def review_patches(pr: PullRequestResponse, client: AsyncOpenAI,
             'repository_context': [],
             'visible_new_lines': sorted(allowed_lines),
         }
+        if static_evidence:
+            payload['static_evidence'] = static_evidence
         def serialized() -> str:
             return json.dumps(payload, ensure_ascii=False)
 
         text = serialized()
-        base_cost = len(INSTRUCTIONS) + len(text) + SCHEMA_CHAR_ALLOWANCE
-        if base_cost > MAX_MODEL_INPUT_CHARS or total_input_chars + base_cost > MAX_TOTAL_MODEL_INPUT_CHARS:
+        base_cost = len(instructions) + len(text) + SCHEMA_CHAR_ALLOWANCE
+        if base_cost > MAX_MODEL_INPUT_CHARS or total_input_chars + base_cost > input_budget:
             skipped_files.append(file.path)
             skipped_details.append(FileMetadata(path=file.path, reason='Model input character limit reached'))
             continue
@@ -169,18 +175,18 @@ async def review_patches(pr: PullRequestResponse, client: AsyncOpenAI,
                 continue  # The complete file is already included as the review target.
             payload['repository_context'].append(context.model_dump())
             candidate_text = serialized()
-            cost = len(INSTRUCTIONS) + len(candidate_text) + SCHEMA_CHAR_ALLOWANCE
-            if cost > MAX_MODEL_INPUT_CHARS or total_input_chars + cost > MAX_TOTAL_MODEL_INPUT_CHARS:
+            cost = len(instructions) + len(candidate_text) + SCHEMA_CHAR_ALLOWANCE
+            if cost > MAX_MODEL_INPUT_CHARS or total_input_chars + cost > input_budget:
                 payload['repository_context'].pop()
                 warnings.append(f'{context.path}: omitted from review of {file.path} due to model input limits')
                 continue
             text = candidate_text
             included.append(context)
-        total_input_chars += len(INSTRUCTIONS) + len(text) + SCHEMA_CHAR_ALLOWANCE
+        total_input_chars += len(instructions) + len(text) + SCHEMA_CHAR_ALLOWANCE
         try:
             response = await client.responses.parse(
                 model=MODEL,
-                instructions=INSTRUCTIONS,
+                instructions=instructions,
                 input=text,
                 text_format=ModelReview,
                 max_output_tokens=6000,

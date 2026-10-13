@@ -1,6 +1,7 @@
 'use client';
 import { useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import AgentDashboard, { type AgentReview } from './agent-dashboard';
 import Verification, { type FixVerification } from './fix-verification';
 import ProposedFixes, { type FixGeneration, type FixArtifact } from './proposed-fixes';
 import GeneratedTests, { type TestGeneration } from './generated-tests';
@@ -72,13 +73,18 @@ export default function Home() {
   const [verification, setVerification] = useState<FixVerification | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [verificationError, setVerificationError] = useState('');
-  const busy = loading || reviewing || generating || fixing || verifying;
+  const [agents, setAgents] = useState<AgentReview | null>(null);
+  const [agentLoading, setAgentLoading] = useState(false);
+  const [agentError, setAgentError] = useState('');
+  const busy = loading || reviewing || generating || fixing || verifying || agentLoading;
 
   function clearResults() {
     setAnalysis(null);
     setReview(null);
     setError('');
     setReviewError('');
+    setAgents(null);
+    setAgentError('');
     setFixes(null);
     setFixError('');
     setVerification(null);
@@ -139,6 +145,8 @@ export default function Home() {
     if (!analysis || busy) return;
     setReview(null);
     setReviewError('');
+    setAgents(null);
+    setAgentError('');
     setFixes(null);
     setFixError('');
     setVerification(null);
@@ -284,6 +292,22 @@ export default function Home() {
     } finally {
       setVerifying(false);
     }
+  }
+
+  async function runAgentReview() {
+    if (!analysis || busy) return;
+    setAgents(null); setAgentError(''); setAgentLoading(true);
+    try {
+      const response = await fetch(`${apiUrl.replace(/\/$/, '')}/agent-review`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({repository: analysis.repository, pull_request: analysis.pull_request}),
+        signal: AbortSignal.timeout(1020000),
+      });
+      const value = await response.json();
+      if (!response.ok) throw new Error(typeof value.detail === 'string' ? value.detail : 'Agent review failed.');
+      setAgents(value as AgentReview);
+    } catch (err) { setAgentError(err instanceof Error ? err.message : 'Agent review failed.'); }
+    finally { setAgentLoading(false); }
   }
 
   return (
@@ -467,6 +491,13 @@ export default function Home() {
             </p>
           )}
         </div>
+        {analysis && <div className="test-generation-action">
+          <button type="button" disabled={busy} onClick={runAgentReview}>{agentLoading ? 'Coordinating agents…' : 'Run Agent Review'}</button>
+          <p className="muted small">Bounded specialist reviews, shared test/fix evidence, and deterministic verification. No GitHub writes.</p>
+        </div>}
+        {agentLoading && <p className="empty muted" role="status">Coordinating specialist agents; partial coverage will be reported if a role fails…</p>}
+        {agentError && <p className="error" role="alert">{agentError}</p>}
+        {agents && <AgentDashboard key={agents.review_id} result={agents} />}
         {reviewError && (
           <p className="error" role="alert">
             {reviewError}
@@ -528,7 +559,7 @@ export default function Home() {
         {verificationError && <p className="error" role="alert">{verificationError}</p>}
         {verification && <Verification result={verification} />}
         <footer>
-          RepoPilot <span>Milestone 08 · Fix verification</span>
+          RepoPilot <span>Milestone 09 · Multi-agent review</span>
         </footer>
       </main>
     </div>

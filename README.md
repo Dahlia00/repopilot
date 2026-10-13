@@ -1,8 +1,8 @@
 # RepoPilot
 
-AI-powered code review and debugging assistant — milestone 8: isolated fix verification.
+AI-powered code review and debugging assistant — milestone 9: coordinated agent review and controlled GitHub previews/automation.
 
-RepoPilot fetches real GitHub PR metadata and changed files, displays expandable patches, combines repository-aware AI review with local Bandit and optional Semgrep scans, generates statically validated pytest and local code-fix proposals, and verifies eligible fixes with restricted pytest execution and before/after scans in disposable workspaces. Public GitHub repositories work without a GitHub token. AI review requires a backend OPENAI_API_KEY. Verification runs only in temporary workspaces; it does not modify the analyzed repository or the PR, post GitHub comments, or include agents, a database, or Docker.
+RepoPilot fetches real GitHub PR metadata and changed files, displays expandable patches, combines repository-aware AI review with local Bandit and optional Semgrep scans, generates statically validated pytest and local code-fix proposals, and verifies eligible fixes with restricted pytest execution and before/after scans in disposable workspaces. Public GitHub repositories work without a GitHub token. AI review requires a backend OPENAI_API_KEY. Verification runs only in temporary workspaces. The default GitHub mode is read-only: Agent Review and preview endpoints never write. Explicit backend write actions require both the environment switch and request confirmation. No database or Docker is added.
 
 ## Requirements
 
@@ -101,7 +101,7 @@ Without this variable, **Fetch Pull Request** still works. **Analyze with AI** r
 - `/analyze` remains a GitHub-only retrieval endpoint.
 - `/review` retrieves the real PR, builds a bounded snapshot through `backend/context.py`, and delegates AI analysis to `backend/review.py`.
 - Each reviewable changed file is sent with its filename, patch, **full head-commit content**, and selected repository context in a separate official `AsyncOpenAI` SDK request. A file is never reviewed using only its patch if full content is unavailable. Removed, unsupported, oversized, or over-budget files are explicitly skipped; reasons are returned.
-- The fixed model is `gpt-4.1-mini-2025-04-14`. Instructions require reviewing every changed line, hunk, and function for bugs, security vulnerabilities, edge cases, error handling, performance, and code quality, including assumptions about collections, null/empty values, indexing, and input validation. The model must continue after finding a prominent issue and return independent root causes as separate findings, up to **10 findings per changed file**, without padding the count. No tools or agents are used. Patches are treated as untrusted content, not instructions.
+- The fixed model is `gpt-4.1-mini-2025-04-14`. Instructions require reviewing every changed line, hunk, and function for bugs, security vulnerabilities, edge cases, error handling, performance, and code quality, including assumptions about collections, null/empty values, indexing, and input validation. The model must continue after finding a prominent issue and return independent root causes as separate findings, up to **10 findings per changed file**, without padding the count. The standalone `/review` endpoint uses no tool-using agent orchestration. Patches are treated as untrusted content, not instructions.
 - The Responses API uses a strict Pydantic structured-output schema. The backend validates severity/category, confidence from 0–100, file identity, and line numbers against the full changed file. The prompt prefers changed-line locations and requires explaining any PR connection for affected surrounding code. Unknown locations use `line: null`. See [official OpenAI Structured Outputs guidance](https://developers.openai.com/api/docs/guides/structured-outputs) and the [model documentation](https://developers.openai.com/api/docs/models/gpt-4.1-mini).
 - Results are sorted by severity. Empty findings are valid; no findings are synthesized or substituted when a review fails. The response includes `reviewed_files`, `skipped_files`, and `model` alongside PR information and `findings`.
 - The prompt distinguishes PR changes from surrounding source and repository context, using context for imports, function calls, data flow, and assumptions. It rejects unrelated pre-existing issues. Missing patches or excluded full files limit coverage. Check recommendations before acting on them. AI requests consume your OpenAI API quota; clicking AI review again makes new requests.
@@ -163,7 +163,7 @@ Next.js: Analyze with AI → /review
   response: PR data + AI/static findings + scanner statuses + context + combined summary
 ```
 
-Internal Pydantic structures distinguish `FullChangedFile` (path, status, patch, full content, skip reason), `ContextFile` (path, content, selection reason), and `RepositoryContext` (repository, commit, changed files, context files, warnings). The frontend keeps AI findings and repository context, adds static findings/scanner statuses, and shows combined counts. There are no agents, automatic fixes, GitHub comments, database, Docker, or repository mutations.
+Internal Pydantic structures distinguish `FullChangedFile` (path, status, patch, full content, skip reason), `ContextFile` (path, content, selection reason), and `RepositoryContext` (repository, commit, changed files, context files, warnings). The frontend keeps AI findings and repository context, adds static findings/scanner statuses, and shows combined counts. This standalone pipeline remains read-only; Milestone 9 adds separate bounded coordination and explicitly gated GitHub actions.
 
 ## Static analysis and scanner installation
 
@@ -333,7 +333,7 @@ The original snippet must exactly match the source function. The replacement mus
 
 AST checks reject newly introduced imports, nested functions/classes, async/global changes, reflection, callable/import rebinding, and attribute mutation. New calls are restricted to a conservative set of pure builtins and standard exceptions; existing calls can remain for local fixes, but new or modified dangerous calls are rejected, including known imported aliases. Checks cover subprocess/shell execution, eval/exec, dynamic execution, filesystem writes/deletion, network modules, suspicious shell strings, credential assignments, and recognizable secret formats. This conservative approach can reject a valid fix requiring an unfamiliar external API; the proposal is displayed as rejected rather than applied.
 
-`safe_to_verify` means static checks passed, **not** proof of correctness, absence of secrets, or safety to execute. Static validation cannot resolve every indirect call or certify existing module side effects. Human review remains necessary. The generation endpoints do not apply or run proposals/tests, commit, push, comment, or create PRs. Only the explicit Milestone 8 verification endpoint can execute eligible code/tests inside its restricted temporary sandbox. No database, agents, or Docker execution are added.
+`safe_to_verify` means static checks passed, **not** proof of correctness, absence of secrets, or safety to execute. Static validation cannot resolve every indirect call or certify existing module side effects. Human review remains necessary. The generation endpoints do not apply or run proposals/tests, commit, push, comment, or create PRs. Only the explicit Milestone 8 verification endpoint can execute eligible code/tests inside its restricted temporary sandbox. The generation endpoints add no database, autonomous agents, or Docker execution.
 
 Limits: up to five combined issues, 4,000 characters per original/replacement function, 1,000 replacement AST nodes, 60,000 input characters per fix call (including schema/instructions), 120,000 total fix input characters, and 4,000 output tokens per call. Existing repository, scanner, review, and test-generation limits remain in force. Fix generation has a 180-second overall limit after review/test evidence; the frontend permits up to 13 minutes for the full request. API errors and malformed/incomplete JSON return useful sanitized errors. Rejected proposals remain inspectable; declined/unsupported findings have explicit reasons.
 
@@ -454,7 +454,124 @@ curl --max-time 210 -X POST http://127.0.0.1:8000/verify-fix \
 
 The request contains code as data; do not execute the JSON or its code fields. Missing tests produce SKIPPED, and characterization tests can correctly produce FAILED. Previously generated artifacts can be verified while OpenAI is unavailable. No database or server-side artifact cache is introduced; the frontend retains artifacts in memory for the current session.
 
-No Apply button, automatic repository changes, commits, pushes, GitHub comments/PRs, autonomous agents, database, or Docker execution are added.
+The verification stage has no Apply button and performs no repository/GitHub writes. Optional Milestone 9 GitHub actions are separate and explicitly gated; no autonomous tool discovery, database, or Docker is added.
+
+## Milestone 9: bounded agents and controlled GitHub actions
+
+RepoPilot now coordinates six fixed roles. These are predefined services, not autonomous tool-using agents. They cannot invent tools, arbitrary commands, GitHub URLs, or action types.
+
+| Role | Responsibility | Implementation |
+| --- | --- | --- |
+| Bug | Correctness, edge cases, null/empty handling, state and error handling | Scoped structured AI review |
+| Security | Injection, auth boundaries, secrets, validation, unsafe APIs/dependencies | Scoped AI review plus retained Bandit/Semgrep evidence |
+| Performance | Repeated work, inefficient loops/calls, memory and scaling | Scoped structured AI review |
+| Test | Testability, desired behavior contracts, regression cases and coverage gaps | Existing Milestone 6 contract-bound generator |
+| Fix | Minimal local changes under shared contracts; human-only proposals when ambiguous | Existing Milestone 7 generator |
+| Verification | Deterministic contract, sandboxed pytest and scanner evidence | Milestone 8; never AI safety guesses |
+
+`POST /agent-review` accepts `{"repository":"Dahlia00/repopilot","pull_request":1}`. GitHub metadata/context and static scans are fetched once. Three specialist review passes share that snapshot (at most two concurrently), each limited to its category and 66,000 cumulative input characters, with existing per-file/output limits. Static evidence is untrusted JSON in the Security input, not an instruction/tool grant. There is no fourth general review call: merged AI evidence feeds Test/Fix once each. Verification uses those exact artifacts without OpenAI. Review-role limits are 180 seconds each; Test/Fix/Verification retain 120/180/360-second stage limits, with a 900-second orchestrator deadline. The frontend allows seventeen minutes for the full Agent Review. Failed roles and skipped files are reported as incomplete coverage; they never imply CLEAN.
+
+Responses contain PR/context metadata, six role outputs, deduplicated/ranked findings, tests/contracts, proposals, deterministic verification, an evidence-derived senior summary, recommended **preview** actions, and `github_writes_performed:false`. Original observations remain in role outputs. Deduplication conservatively groups the same file, known line, normalized category and issue family/title, retaining every agent/tool evidence record. Unknown-location observations remain separate. Ranking uses severity, confidence, then location. Scanner observations are LIKELY rather than a claim of exploitability; LOW suggestions are INFORMATIONAL; uncertain behavior is AMBIGUOUS. CONFIRMED requires deterministic evidence. No role can turn failed/skipped verification into `safe_to_apply=true`.
+
+The **Senior Engineer Review** is deterministic: HIGH/CRITICAL non-informational findings produce advisory CHANGES_REQUESTED; other findings or incomplete coverage produce REVIEW_RECOMMENDED; CLEAN requires no findings and complete coverage. It lists blocking/non-blocking IDs, verified fixes, human-review items and coverage gaps. It cannot invent findings and never submits a GitHub approval or rejection.
+
+### Server-side artifacts
+
+An opaque `review_id` identifies canonical server-held results. This is a process-local bounded store (twenty sessions, ten-minute TTL, maximum six million serialized characters per record), not a database or persistent cache. It is cleared by restart/reload; expired/evicted IDs require a new Agent Review. IDs are bound to repository and PR. Clients cannot supply code, URLs, GitHub bodies/actions, arbitrary branches, or safety flags to automation endpoints. Treat IDs as local session capabilities; the backend remains intended for local use, not a public multi-user service. Public display/actions redact environment keys and recognizable credential/secret formats; fix publication is refused if source/test/diff contains such content.
+
+### GitHub default read-only mode
+
+```sh
+export GITHUB_WRITE_ENABLED=false
+```
+
+This is the default when unset. Preview endpoints always return a dry-run plan, even if write mode is enabled or a caller sends `confirm_write:true`:
+
+```text
+POST /github/preview-review
+POST /github/preview-fix-pr
+```
+
+Bodies contain `repository`, `pull_request`, `review_id`, and optional `finding_id` for a fix preview. Review preview includes a human-review summary and high-confidence inline comments at valid RIGHT-side patch lines. It is always a GitHub COMMENT event, never APPROVE/REQUEST_CHANGES. Fix preview requires a validated compatible proposal and PASSED deterministic verification with `safe_to_apply=true`; otherwise it returns `available:false` and no actions. It shows affected files, exact source/test changes, generated regression test, verification and scanner evidence, and the proposed draft PR. Sequential Git object SHA placeholders explicitly identify outputs of preceding predefined actions.
+
+The frontend shows **READ-ONLY MODE** and **GitHub writes are disabled.** by default. Its buttons call only preview endpoints. There are no publish/merge/apply buttons.
+
+### Optional, explicitly confirmed backend writes
+
+Only these fixed write endpoints exist:
+
+```text
+POST /github/post-review
+POST /github/create-fix-pr
+```
+
+They require **both** `GITHUB_WRITE_ENABLED=true` and strict JSON boolean `confirm_write:true`. If either is absent/false, they return the same dry-run preview and perform zero GitHub requests for writing. A token is required only after both gates pass. No real write is part of the initial Milestone 9 validation.
+
+Configure an existing fine-grained token in the backend terminal without pasting it into chat or a file:
+
+```sh
+read -rs 'GITHUB_TOKEN?GitHub token: '
+export GITHUB_TOKEN
+export GITHUB_WRITE_ENABLED=false
+```
+
+Never put tokens in frontend variables, code, documentation, logs or committed files; `.env` remains ignored. Scope fine-grained tokens to the selected repositories only, including the PR head repository for fork-based fix PRs. Minimum permissions:
+
+| Capability | Repository permissions |
+| --- | --- |
+| Public PR/source read | No token required |
+| Private PR/source read | Pull requests: read; Contents: read |
+| PR summary/inline review COMMENT | Pull requests: write |
+| New branch/tree/commit | Contents: write |
+| Draft fix PR | Pull requests: write, plus Contents: write for its new branch |
+
+See GitHub's official [review permissions](https://docs.github.com/en/rest/pulls/reviews), [Git-tree permissions](https://docs.github.com/en/rest/git/trees), [reference permissions](https://docs.github.com/en/rest/git/refs), and [PR permissions](https://docs.github.com/en/rest/pulls/pulls). No organization-wide/admin permissions, workflow edits, or repository deletion permissions are requested.
+
+Before writes, RepoPilot refetches the open PR and refuses changed SHA/head repository/head branch. Reviews are pinned to that commit. Fix publication reruns deterministic verification with existing artifacts, requires matching test/source, and checks target ref and generated test-path collisions. The target ref is checked again after branch creation, and the draft PR receipt must contain the verified base/head SHAs; detected changes block continuation and require manual remote-state inspection. Only non-executable regular Python source files are supported for publication. It creates an atomic new `repopilot/fix-<finding-id>` ref pointing to a new commit; no existing ref is updated. The draft fix PR targets the original feature head branch in its head repository. Main/master targets are refused conservatively. Duplicate branches, existing test paths, expired artifacts, failed/ambiguous verification, missing tokens, unsafe names, and malformed GitHub responses prevent publication. No client-provided branch is accepted. PR title/body identify RepoPilot and require human review.
+
+Per-session action locks and attempted-write flags block duplicate/blind retries. GitHub object creation is not transactional: an API timeout/failure may leave an orphan tree/commit, a new branch, or an already-created review/PR. The API reports a sanitized failure; inspect remote state manually rather than retrying or deleting anything automatically. GitHub workflows may run when a future explicitly approved branch/PR is created; RepoPilot itself does not run remote workflows or merge anything.
+
+RepoPilot never automatically merges, approves/rejects reviews, pushes main/master, force-pushes, deletes branches, closes PRs, applies arbitrary model actions, or bypasses verification. Preview buttons never cause a write.
+
+### Milestone 9 architecture
+
+```text
+/agent-review (no GitHub writes)
+  GitHub immutable PR/context + one static scan
+  Orchestrator → Bug / Security / Performance (bounded structured AI roles)
+  shared normalized evidence → Test → Fix → deterministic Verification
+  evidence-preserving dedup/ranking → Senior Engineer advisory summary
+  expiring canonical server artifact store → review_id
+Frontend Agent Review dashboard + preview-only GitHub Actions
+  /github/preview-review        → exact COMMENT/inline plan
+  /github/preview-fix-pr        → verified draft fix plan or unavailable reason
+Optional backend execution (not used in initial validation)
+  write switch AND confirm_write AND token
+  canonical artifacts + fresh snapshot + collision checks + verification
+  fixed COMMENT or new branch/draft PR actions only
+```
+
+### Read-only local PR #1 validation
+
+Start the backend with `OPENAI_API_KEY` configured, `GITHUB_WRITE_ENABLED=false`, and existing scanner dependencies, then run the frontend normally. Enter `Dahlia00/repopilot`, PR `1`, Fetch Pull Request, then **Run Agent Review**. Inspect roles, retained static evidence, advisory summary, coverage/ambiguity and verification. Click **Preview review comment** and **Preview verified fix PR** only. An unavailable fix preview is correct when no fix passed deterministic verification.
+
+Direct read-only calls:
+
+```sh
+curl --max-time 1020 -X POST http://127.0.0.1:8000/agent-review \
+  -H 'Content-Type: application/json' \
+  -d '{"repository":"Dahlia00/repopilot","pull_request":1}'
+```
+
+Copy the returned `review_id` into a preview request; do not call write endpoints during first validation:
+
+```sh
+curl -X POST http://127.0.0.1:8000/github/preview-review \
+  -H 'Content-Type: application/json' \
+  -d '{"repository":"Dahlia00/repopilot","pull_request":1,"review_id":"REPLACE_WITH_RETURNED_REVIEW_ID"}'
+```
+
+Use `/github/preview-fix-pr` with the same request and an eligible verified `finding_id`, if any. Without an eligible finding it returns an unavailable dry-run preview. Tests mock every GitHub mutation; no unit test writes remotely.
 
 ## Checks
 
@@ -493,6 +610,10 @@ repopilot/
     test_test_generation.py
     fix_generation.py
     test_fix_generation.py
+    agents.py
+    github_actions.py
+    test_agents.py
+    test_github_actions.py
     contracts.py
     test_contracts.py
     verification.py
@@ -516,6 +637,7 @@ repopilot/
       proposed-fixes.tsx
       fix-verification.tsx
       behavior-contract.tsx
+      agent-dashboard.tsx
     eslint.config.mjs
     next-env.d.ts
     next.config.ts

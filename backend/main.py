@@ -15,6 +15,8 @@ from pipeline import PipelineResponse, combine_review
 from test_generation import TestGenerationResponse, generate_tests, ValidatedProposal, IdentifiedFinding
 from fix_generation import FixGenerationResponse, generate_fixes, ValidatedFix, target_function
 from verification import VerificationResponse, VerificationResult, verify_fixes, verify_one, module_path
+from agents import orchestrate, STORE
+from github_actions import review_plan, fix_plan, post_review, create_fix_pr, public_data
 
 
 class AnalyzeRequest(BaseModel):
@@ -52,6 +54,13 @@ class GenerateFixRequest(AnalyzeRequest):
         if value is not None and (len(value.tests) > 5 or len(value.findings) > 200):
             raise ValueError('Test artifact count exceeds generation limits.')
         return value
+
+
+class GithubActionRequest(AnalyzeRequest):
+    model_config = ConfigDict(extra='forbid')
+    review_id: str = Field(pattern=r'^[0-9a-f-]{36}$')
+    finding_id: str | None = Field(default=None, max_length=80)
+    confirm_write: bool = Field(default=False, strict=True)
 
 
 app = FastAPI(title='RepoPilot API')
@@ -186,3 +195,37 @@ async def verify_existing_fix(
         return await asyncio.wait_for(verify_one(fix, snapshot, tests), timeout=100)
     except asyncio.TimeoutError as exc:
         raise HTTPException(504, 'Deterministic verification timed out; temporary processes and files were cleaned up.') from exc
+
+
+@app.post('/agent-review')
+async def agent_review(request: AnalyzeRequest, client: httpx.AsyncClient = Depends(get_github_client),
+                       ai_client: AsyncOpenAI = Depends(get_openai_client)):
+    pr = await analyze(request, client)
+    try:
+        snapshot = await asyncio.wait_for(build_repository_context(pr, client), timeout=45)
+        static = await run_static_analysis(snapshot)
+        response = await asyncio.wait_for(orchestrate(pr, snapshot, static, ai_client), timeout=900)
+        return public_data(response.model_dump(mode='json'))
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(504, 'Agent review exceeded its overall limit; no GitHub writes were performed.') from exc
+
+
+@app.post('/github/preview-review')
+async def preview_github_review(request: GithubActionRequest):
+    return review_plan(STORE.get(request.review_id, request.repository, request.pull_request))
+
+
+@app.post('/github/post-review')
+async def post_github_review(request: GithubActionRequest, client: httpx.AsyncClient = Depends(get_github_client)):
+    return await post_review(STORE.get(request.review_id, request.repository, request.pull_request), client, request.confirm_write)
+
+
+@app.post('/github/preview-fix-pr')
+async def preview_github_fix_pr(request: GithubActionRequest):
+    return fix_plan(STORE.get(request.review_id, request.repository, request.pull_request), request.finding_id)
+
+
+@app.post('/github/create-fix-pr')
+async def create_github_fix_pr(request: GithubActionRequest, client: httpx.AsyncClient = Depends(get_github_client)):
+    return await create_fix_pr(STORE.get(request.review_id, request.repository, request.pull_request), client,
+                               request.finding_id, request.confirm_write)
