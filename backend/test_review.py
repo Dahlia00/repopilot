@@ -107,6 +107,41 @@ class ReviewEndpointTests(unittest.TestCase):
     def review(self, **kwargs):
         return self.client.post('/review', json={'repository': 'Dahlia00/repopilot', 'pull_request': 1, **kwargs})
 
+    def test_generate_tests_endpoint_uses_refreshed_findings_and_context(self):
+        self.full_sources['sample.py'] = 'def choose(values):\n    return values[0]\n'
+        original = self.success
+        def handler(request):
+            body = json.loads(request.content)
+            if body['text']['format']['name'] == 'ModelReview':
+                return original(request)
+            payload = json.loads(body['input'])
+            generated = {'proposal': {
+                'finding_id': payload['finding_id'], 'file': payload['file'], 'framework': 'pytest',
+                'test_name': 'test_boundary',
+                'test_code': 'import pytest\nfrom sample import choose\ndef test_boundary():\n    with pytest.raises(IndexError):\n        choose([])\n',
+                'purpose': 'Characterize a boundary input.', 'expected_behavior': 'Current failure is reproduced.',
+                'execution_safe': True,
+            }, 'reason': ''}
+            return httpx.Response(200, json={'id':'resp_test','status':'completed','output':[{
+                'type':'message','role':'assistant','content':[{'type':'output_text','text':json.dumps(generated)}]}]})
+        self.ai_handler = handler
+        response = self.client.post('/generate-tests', json={'repository':'Dahlia00/repopilot','pull_request':1})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['safe_tests'], 1)
+        self.assertEqual(response.json()['rejected_tests'], 0)
+        self.assertEqual(response.json()['head_sha'], 'a' * 40)
+        generation_request = self.ai_requests[-1]
+        payload = json.loads(json.loads(generation_request.content)['input'])
+        self.assertEqual(payload['target_function'], 'choose')
+        self.assertEqual(payload['repository_context'][0]['path'], 'README.md')
+
+    def test_generate_tests_missing_key(self):
+        del app.dependency_overrides[get_openai_client]
+        with patch.dict(os.environ, {'OPENAI_API_KEY': ''}):
+            response = self.client.post('/generate-tests', json={'repository':'Dahlia00/repopilot','pull_request':1})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(self.ai_requests, [])
+
     def test_sdk_structured_review_and_patch_coverage(self):
         response = self.review()
         self.assertEqual(response.status_code, 200, response.text)

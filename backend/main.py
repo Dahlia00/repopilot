@@ -11,6 +11,7 @@ from review import get_openai_client, review_patches
 from context import build_repository_context
 from static_analysis import run_static_analysis
 from pipeline import PipelineResponse, combine_review
+from test_generation import TestGenerationResponse, generate_tests
 
 
 class AnalyzeRequest(BaseModel):
@@ -75,3 +76,18 @@ async def review(
         return combine_review(ai, static)
     except asyncio.TimeoutError as exc:
         raise HTTPException(504, 'AI review exceeded the five-minute time limit. No partial review is returned.') from exc
+
+
+@app.post('/generate-tests', response_model=TestGenerationResponse)
+async def generate_test_proposals(
+    request: AnalyzeRequest,
+    client: httpx.AsyncClient = Depends(get_github_client),
+    ai_client: AsyncOpenAI = Depends(get_openai_client),
+) -> TestGenerationResponse:
+    pr = await analyze(request, client)
+    try:
+        repository = await asyncio.wait_for(build_repository_context(pr, client), timeout=45)
+        reviewed = await asyncio.wait_for(review_patches(pr, ai_client, repository), timeout=300)
+        return await asyncio.wait_for(generate_tests(reviewed, repository, ai_client), timeout=120)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(504, 'Review or test generation exceeded its time limit. No generated code was executed.') from exc

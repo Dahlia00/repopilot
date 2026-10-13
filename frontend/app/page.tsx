@@ -1,6 +1,7 @@
 'use client';
 import { useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import GeneratedTests, { type TestGeneration } from './generated-tests';
 import StaticAnalysis, {
   ReviewSummary,
   type StaticFinding,
@@ -60,13 +61,18 @@ export default function Home() {
   const [review, setReview] = useState<Review | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [reviewError, setReviewError] = useState('');
-  const busy = loading || reviewing;
+  const [generated, setGenerated] = useState<TestGeneration | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState('');
+  const busy = loading || reviewing || generating;
 
   function clearResults() {
     setAnalysis(null);
     setReview(null);
     setError('');
     setReviewError('');
+    setGenerated(null);
+    setGenerationError('');
   }
 
   async function analyze(event: FormEvent<HTMLFormElement>) {
@@ -121,6 +127,8 @@ export default function Home() {
     if (!analysis || busy) return;
     setReview(null);
     setReviewError('');
+    setGenerated(null);
+    setGenerationError('');
     setReviewing(true);
     try {
       const response = await fetch(`${apiUrl.replace(/\/$/, '')}/review`, {
@@ -155,6 +163,42 @@ export default function Home() {
       );
     } finally {
       setReviewing(false);
+    }
+  }
+
+  async function generateTestProposals() {
+    if (!review || busy) return;
+    setGenerated(null);
+    setGenerationError('');
+    setGenerating(true);
+    try {
+      const response = await fetch(`${apiUrl.replace(/\/$/, '')}/generate-tests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repository: review.repository, pull_request: review.pull_request }),
+        signal: AbortSignal.timeout(600000),
+      });
+      if (!response.ok) {
+        const body: { detail?: unknown } = await response.json().catch(() => ({}));
+        throw new Error(
+          typeof body.detail === 'string'
+            ? body.detail
+            : `Test generation failed (HTTP ${response.status}).`,
+        );
+      }
+      setGenerated((await response.json()) as TestGeneration);
+    } catch (err) {
+      setGenerationError(
+        err instanceof TypeError
+          ? 'Could not connect to RepoPilot API.'
+          : err instanceof Error && ['TimeoutError', 'AbortError'].includes(err.name)
+            ? 'Test generation timed out. Please try again.'
+            : err instanceof Error
+              ? err.message
+              : 'Test generation failed.',
+      );
+    } finally {
+      setGenerating(false);
     }
   }
 
@@ -346,6 +390,14 @@ export default function Home() {
         )}
         {review && (
           <>
+            <div className="test-generation-action">
+              <button type="button" disabled={busy} onClick={generateTestProposals}>
+                {generating ? 'Generating tests…' : 'Generate tests'}
+              </button>
+              <p className="muted small">
+                Creates proposals from a refreshed review. Code is never run or saved.
+              </p>
+            </div>
             <ReviewSummary summary={review.summary} />
             <ReviewFindings
               findings={review.ai_findings}
@@ -366,8 +418,21 @@ export default function Home() {
             />
           </>
         )}
+        <div role="status" aria-live="polite">
+          {generating && (
+            <p className="empty muted">
+              Refreshing review findings and generating focused test proposals…
+            </p>
+          )}
+        </div>
+        {generationError && (
+          <p className="error" role="alert">
+            {generationError}
+          </p>
+        )}
+        {generated && <GeneratedTests result={generated} />}
         <footer>
-          RepoPilot <span>Milestone 05 · Security & static analysis</span>
+          RepoPilot <span>Milestone 06 · Automated test generation</span>
         </footer>
       </main>
     </div>
