@@ -1,0 +1,27 @@
+rules:
+  - id: python-dynamic-eval
+    languages: [python]
+    severity: WARNING
+    message: Dynamic evaluation can execute untrusted Python code. Prefer explicit parsing and validation.
+    pattern-either:
+      - pattern: eval($CODE, ...)
+      - pattern: exec($CODE, ...)
+    metadata:
+      category: security
+      title: Dynamic Python code evaluation
+  - id: javascript-dynamic-eval
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Dynamic evaluation can execute untrusted JavaScript. Prefer explicit parsing and validation.
+    pattern: eval($CODE)
+    metadata:
+      category: security
+      title: Dynamic JavaScript code evaluation
+  - id: python-shell-command
+    languages: [python]
+    severity: WARNING
+    message: Enabling shell execution can expose command injection when arguments contain untrusted input. Prefer an argument list with shell disabled.
+    pattern: subprocess.$FUNC(..., shell=True, ...)
+    metadata:
+      category: security
+      title: Shell command execution

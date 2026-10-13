@@ -7,8 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from github import PullRequestResponse, fetch_pull_request, get_github_client
-from review import ReviewResponse, get_openai_client, review_patches
+from review import get_openai_client, review_patches
 from context import build_repository_context
+from static_analysis import run_static_analysis
+from pipeline import PipelineResponse, combine_review
 
 
 class AnalyzeRequest(BaseModel):
@@ -56,18 +58,20 @@ async def analyze(
         raise HTTPException(504, 'Fetching GitHub pull request data timed out. Please try again.') from exc
 
 
-@app.post('/review', response_model=ReviewResponse)
+@app.post('/review', response_model=PipelineResponse)
 async def review(
     request: AnalyzeRequest,
     client: httpx.AsyncClient = Depends(get_github_client),
     ai_client: AsyncOpenAI = Depends(get_openai_client),
-) -> ReviewResponse:
+) -> PipelineResponse:
     pr = await analyze(request, client)
     try:
         repository = await asyncio.wait_for(build_repository_context(pr, client), timeout=45)
     except asyncio.TimeoutError as exc:
         raise HTTPException(504, 'GitHub repository context retrieval timed out. Please try again.') from exc
+    static = await run_static_analysis(repository)
     try:
-        return await asyncio.wait_for(review_patches(pr, ai_client, repository), timeout=300)
+        ai = await asyncio.wait_for(review_patches(pr, ai_client, repository), timeout=300)
+        return combine_review(ai, static)
     except asyncio.TimeoutError as exc:
         raise HTTPException(504, 'AI review exceeded the five-minute time limit. No partial review is returned.') from exc

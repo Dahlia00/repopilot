@@ -1,6 +1,12 @@
 'use client';
 import { useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import StaticAnalysis, {
+  ReviewSummary,
+  type StaticFinding,
+  type ScannerReport,
+  type CombinedSummary,
+} from './static-analysis';
 import ReviewFindings, { type Finding } from './review-findings';
 import RepositoryContext, {
   type ContextFileMetadata,
@@ -29,6 +35,11 @@ type Analysis = {
 };
 type Review = Analysis & {
   findings: Finding[];
+  ai_findings: (Finding & { source: 'AI' })[];
+  static_findings: StaticFinding[];
+  scanners: ScannerReport[];
+  static_skipped_files: SkippedFileMetadata[];
+  summary: CombinedSummary;
   reviewed_files: string[];
   skipped_files: string[];
   model: string;
@@ -119,7 +130,7 @@ export default function Home() {
           repository: analysis.repository,
           pull_request: analysis.pull_request,
         }),
-        signal: AbortSignal.timeout(420000),
+        signal: AbortSignal.timeout(480000),
       });
       if (!response.ok) {
         const body: { detail?: unknown } = await response.json().catch(() => ({}));
@@ -324,7 +335,7 @@ export default function Home() {
         <div role="status" aria-live="polite">
           {reviewing && (
             <p className="empty muted">
-              Reviewing changed code with AI… Larger pull requests may take a few minutes.
+              Running security scanners and AI review… Larger pull requests may take a few minutes.
             </p>
           )}
         </div>
@@ -335,10 +346,16 @@ export default function Home() {
         )}
         {review && (
           <>
+            <ReviewSummary summary={review.summary} />
             <ReviewFindings
-              findings={review.findings}
+              findings={review.ai_findings}
               reviewedFiles={review.reviewed_files}
               skippedFiles={review.skipped_files}
+            />
+            <StaticAnalysis
+              findings={review.static_findings}
+              scanners={review.scanners}
+              skippedFiles={review.static_skipped_files}
             />
             <RepositoryContext
               files={review.repository_context}
@@ -350,7 +367,7 @@ export default function Home() {
           </>
         )}
         <footer>
-          RepoPilot <span>Milestone 04 · Repository understanding</span>
+          RepoPilot <span>Milestone 05 · Security & static analysis</span>
         </footer>
       </main>
     </div>

@@ -4,7 +4,7 @@ import base64
 import json
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import httpx
 from fastapi.testclient import TestClient
@@ -12,6 +12,7 @@ from openai import AsyncOpenAI
 
 from github import get_github_client
 from main import app
+from static_analysis import StaticResult
 from review import MAX_FINDINGS_PER_FILE, MODEL, SCHEMA_CHAR_ALLOWANCE, get_openai_client, visible_new_lines
 
 PR_PATH = '/repos/Dahlia00/repopilot/pulls/1'
@@ -92,6 +93,9 @@ class ReviewEndpointTests(unittest.TestCase):
 
         app.dependency_overrides[get_github_client] = github_client
         app.dependency_overrides[get_openai_client] = ai_client
+        scanner_patch = patch('main.run_static_analysis', new=AsyncMock(return_value=StaticResult(findings=[], scanners=[], skipped_files=[])))
+        scanner_patch.start()
+        self.addCleanup(scanner_patch.stop)
         self.client = TestClient(app)
         self.addCleanup(app.dependency_overrides.clear)
         self.addCleanup(self.client.close)

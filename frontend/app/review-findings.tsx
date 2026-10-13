@@ -65,6 +65,7 @@ export default function ReviewFindings({
                 <span className={`severity ${finding.severity.toLowerCase()}`}>
                   {finding.severity}
                 </span>
+                <span className="tag">AI</span>
                 <span>{finding.category}</span>
                 <span className="confidence">{finding.confidence}% confidence</span>
               </div>

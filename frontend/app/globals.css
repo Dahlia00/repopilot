@@ -587,3 +587,38 @@ button:disabled {
   outline: 2px solid var(--accent);
   outline-offset: 4px;
 }
+
+.combined-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin-top: 32px;
+  padding: 20px 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.combined-summary strong {
+  color: var(--text);
+}
+.scanner-reports {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+}
+.scanner-report {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.scanner-report .tag {
+  margin-left: 12px;
+}
+.scanner-report p {
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 12px 0 0;
+}
