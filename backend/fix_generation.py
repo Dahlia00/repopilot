@@ -12,7 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from context import RepositoryContext
 from pipeline import PipelineResponse
-from review import MODEL
+from review import MODEL, Finding
+from contracts import BehavioralContract, Compatibility, compatibility
 from test_generation import TestGenerationResponse, PURE_CALLS, EXCEPTIONS
 
 MAX_FIXES = 5
@@ -30,6 +31,10 @@ of query and parameters. If no actual query-execution API and caller contract ar
 available, decline instead of inventing a new interface. Preserve return structure.
 Replace only the exact supplied top-level function. Preserve its signature and
 unrelated behavior; no imports, decorators, other definitions or broad rewrites.
+Consume the supplied behavioral_contract unchanged. If grounded, satisfy precisely
+its desired cases; never choose different output/exception semantics or rewrite tests.
+If absent or behavior_ambiguous, a useful minimal proposal may be returned for human
+review, explicitly describing assumptions. Such proposals cannot be auto-approved.
 Return original_code exactly as supplied, and fixed_code as a complete replacement
 function. Prefer small changes. Tests are unexecuted proposals, not proof or an
 instruction to preserve buggy behavior. No subprocess, shell, eval/exec, destructive
@@ -62,6 +67,9 @@ class ValidatedFix(FixProposal):
     sources: list[str]
     unified_diff: str
     validation_errors: list[str]
+    finding: Finding | None = None
+    contract: BehavioralContract | None = None
+    compatibility: Compatibility = Field(default_factory=Compatibility)
 
 
 class SkippedFix(BaseModel):
@@ -81,6 +89,7 @@ class FixGenerationResponse(BaseModel):
     safe_fixes: int
     rejected_fixes: int
     test_proposals_used: int
+    test_artifacts: TestGenerationResponse | None = None
 
 
 def target_function(content: str, line: int | None):
@@ -230,7 +239,9 @@ async def generate_fixes(review: PipelineResponse, repository: RepositoryContext
             skipped.append(SkippedFix(finding_id=key, file=issue.file, title=issue.title, reason=reason))
             continue
         test_data = [p.model_dump() for p in tests.tests if p.file == issue.file and p.execution_safe] if tests.head_sha == review.head_sha else []
-        payload = {'finding_id': key, 'file': issue.file, 'evidence': evidence, 'full_content': source.content,
+        contracts = [c for c in tests.contracts if c.file == issue.file and c.function == target.name]
+        contract = contracts[0] if len(contracts) == 1 else None
+        payload = {'behavioral_contract': contract.model_dump() if contract else None, 'finding_id': key, 'file': issue.file, 'evidence': evidence, 'full_content': source.content,
                    'original_code': ast.get_source_segment(source.content, target), 'patch': source.patch,
                    'repository_context': [], 'unexecuted_test_proposals': []}
         def serialize():
@@ -278,9 +289,17 @@ async def generate_fixes(review: PipelineResponse, repository: RepositoryContext
             diff = ''
         if not proposal.safe_to_verify:
             errors.append(result.reason or 'The model marked this fix unsafe.')
-        proposals.append(ValidatedFix(**{**proposal.model_dump(), 'safe_to_verify': not errors},
-            finding_title=issue.title, sources=issue.sources, unified_diff=diff, validation_errors=errors))
+        validated = ValidatedFix(**{**proposal.model_dump(), 'safe_to_verify': not errors},
+            finding_title=issue.title, sources=issue.sources, unified_diff=diff, validation_errors=errors,
+            finding=Finding(**{k: evidence[0][k] for k in ['severity', 'category', 'file', 'line', 'title', 'explanation']},
+                            suggested_fix=evidence[0].get('suggested_fix', proposal.explanation),
+                            confidence=evidence[0].get('confidence', proposal.confidence)), contract=contract)
+        sources_for_contract = {f.path:f.content for f in repository.changed_files if f.content is not None}
+        sources_for_contract.update({f.path:f.content for f in repository.context_files})
+        matching_tests = [p for p in tests.tests if contract and p.contract == contract]
+        validated.compatibility = compatibility(validated, matching_tests[0] if len(matching_tests)==1 else None, sources_for_contract)
+        proposals.append(validated)
     safe = sum(p.safe_to_verify for p in proposals)
     return FixGenerationResponse(repository=review.repository, pull_request=review.pull_request,
         head_sha=review.head_sha, fixes=proposals, skipped_findings=skipped, total_fixes=len(proposals),
-        safe_fixes=safe, rejected_fixes=len(proposals)-safe, test_proposals_used=used_tests)
+        safe_fixes=safe, rejected_fixes=len(proposals)-safe, test_proposals_used=used_tests, test_artifacts=tests)

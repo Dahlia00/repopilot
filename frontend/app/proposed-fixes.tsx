@@ -1,3 +1,6 @@
+import ContractDetails, { type BehavioralContract, type Compatibility } from './behavior-contract';
+import type { Finding } from './review-findings';
+import type { TestGeneration } from './generated-tests';
 export type FixGeneration = {
   repository: string;
   pull_request: number;
@@ -6,7 +9,11 @@ export type FixGeneration = {
   safe_fixes: number;
   rejected_fixes: number;
   test_proposals_used: number;
+  test_artifacts: TestGeneration | null;
   fixes: {
+    contract: BehavioralContract | null;
+    compatibility: Compatibility;
+    finding: Finding | null;
     finding_id: string;
     finding_title: string;
     sources: string[];
@@ -23,7 +30,12 @@ export type FixGeneration = {
   skipped_findings: { finding_id: string; title: string; reason: string }[];
 };
 
-export default function ProposedFixes({ result }: { result: FixGeneration }) {
+export type FixArtifact = FixGeneration['fixes'][number];
+export default function ProposedFixes({ result, onVerify, busy }: {
+  result: FixGeneration;
+  onVerify: (fix: FixArtifact) => void;
+  busy: boolean;
+}) {
   return (
     <section className="ai-results" aria-labelledby="fixes-title">
       <div className="section-heading">
@@ -52,6 +64,12 @@ export default function ProposedFixes({ result }: { result: FixGeneration }) {
             <p>Related finding: {fix.finding_title}</p>
             <p className="finding-location"><code>{fix.file}</code> · {fix.finding_id}</p>
             <p>{fix.explanation}</p>
+            <ContractDetails contract={fix.contract} />
+            <p className="muted small">Test/fix compatibility: {fix.compatibility.compatible ? 'YES' : 'NO'} · {fix.compatibility.reason}</p>
+            <button type="button" disabled={busy || !fix.safe_to_verify || !fix.finding} onClick={() => onVerify(fix)}>
+              Verify this fix
+            </button>
+            <p className="muted small">Verifies this existing proposal with saved test artifacts. No OpenAI regeneration.</p>
             {fix.validation_errors.length > 0 && <ul className="error">
               {fix.validation_errors.map((error, index) => <li key={index}>{error}</li>)}
             </ul>}

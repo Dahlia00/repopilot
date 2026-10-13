@@ -176,6 +176,16 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
             result = await self.generate()
         self.assertEqual(result.test_proposals_used, 0)
 
+    async def test_fix_generation_consumes_shared_contract_unchanged(self):
+        from test_verification import tests as shared_tests
+        artifacts=shared_tests()
+        with patch(__name__+'.tests',return_value=artifacts):
+            result=await self.generate()
+        payload=json.loads(self.requests[0]['input'])
+        self.assertEqual(payload['behavioral_contract'],artifacts.contracts[0].model_dump())
+        self.assertEqual(result.fixes[0].contract,artifacts.contracts[0])
+        self.assertTrue(result.fixes[0].compatibility.compatible)
+
     async def test_limits(self):
         for limit in ['MAX_FIXES','MAX_INPUT_CHARS','MAX_TOTAL_INPUT_CHARS']:
             with patch('fix_generation.'+limit,0):

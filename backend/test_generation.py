@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from context import RepositoryContext
 from review import Finding, ReviewResponse, MODEL
+from contracts import BehavioralContract, normalize_contract, test_cases, Unknown
 
 MAX_PROPOSALS = 5
 MAX_CODE_CHARS = 6000
@@ -34,9 +35,17 @@ Use plain literal inputs and assertions or pytest.raises. No fixtures, decorator
 classes, async code, loops, network, file operations, shell commands, subprocess,
 eval/exec, reflection, monkeypatching, or external execution. Do not mock away the
 reported problem. Keep this a focused test of deterministic behavior or edge cases.
-Use a documented expected contract when available. Otherwise reproduce the observed
-failure, clearly stating that it characterizes current behavior rather than inventing
-a new contract. Return null proposal with a reason when no such test is justified.
+First establish an explicit desired POST-FIX behavioral contract. Use only strong
+repository documentation/existing-test evidence; desired_behavior must quote the
+supporting evidence verbatim, with its exact path and quote, and concrete cases.
+Do not convert the current bug or a suggested fix into a required contract.
+If the intended behavior is undocumented, inferred, or uncertain, mark the contract
+behavior_ambiguous=true and return null proposal. Never invent a choice of return
+value or exception. Regression tests must encode the DESIRED cases, not characterize
+the current buggy behavior; they should fail before and pass after a valid fix.
+Use direct literal equality/identity assertions on the target or a single exact
+pytest.raises context invoking the target. Keep cases in test order. Return the
+contract with the supplied finding_id/file/target function and the test proposal.
 Return the exact supplied finding_id and file. Name the test test_<descriptive_name>.
 execution_safe is only your assessment; the server independently validates code.
 Do not claim the test has been run. Return structured JSON only."""
@@ -62,9 +71,11 @@ class ModelProposal(BaseModel):
     model_config = ConfigDict(extra='forbid')
     proposal: TestProposal | None
     reason: str
+    contract: BehavioralContract | None = None
 
 
 class ValidatedProposal(TestProposal):
+    contract: BehavioralContract | None = None
     finding_title: str
     validation_errors: list[str]
 
@@ -86,6 +97,7 @@ class TestGenerationResponse(BaseModel):
     total_tests: int
     safe_tests: int
     rejected_tests: int
+    contracts: list[BehavioralContract] = Field(default_factory=list)
 
 
 def identified(findings: list[Finding]) -> list[IdentifiedFinding]:
@@ -209,6 +221,9 @@ async def generate_tests(review: ReviewResponse, repository: RepositoryContext,
     sources = {file.path: file for file in repository.changed_files}
     proposals = []
     skipped = []
+    contracts = []
+    evidence_sources = {f.path: f.content for f in repository.changed_files if f.content is not None}
+    evidence_sources.update({f.path:f.content for f in repository.context_files})
     attempts = 0
     input_chars = 0
     schema_chars = len(json.dumps(ModelProposal.model_json_schema())) + 512
@@ -268,19 +283,30 @@ async def generate_tests(review: ReviewResponse, repository: RepositoryContext,
             raise HTTPException(502, 'OpenAI test generation failed. Please try again.') from exc
         except (ValueError, ValidationError) as exc:
             raise HTTPException(502, 'OpenAI returned malformed or incomplete test proposal JSON.') from exc
+        contract = normalize_contract(result.contract, evidence_sources, finding.finding_id, finding.file, function)
+        contracts.append(contract)
+        if contract.behavior_ambiguous:
+            skipped.append(SkippedFinding(finding_id=finding.finding_id, file=finding.file, title=finding.title,
+                                          reason='behavior_ambiguous: repository evidence does not establish desired behavior.'))
+            continue
         if result.proposal is None:
             skipped.append(SkippedFinding(finding_id=finding.finding_id, file=finding.file, title=finding.title,
                                           reason=result.reason or 'The model could not justify a focused test.'))
             continue
         proposal = result.proposal
         errors = validate_code(proposal, module_name, function)
+        try:
+            if [c.model_dump() for c in test_cases(proposal.test_code, function)] != [c.model_dump() for c in contract.cases]:
+                errors.append('Regression test expectations do not match the desired behavioral contract.')
+        except (Unknown, ValueError, SyntaxError, TypeError, RecursionError):
+            errors.append('Regression test semantics could not be validated against the desired contract.')
         if proposal.finding_id != finding.finding_id or proposal.file != finding.file:
             errors.append('Proposal file or finding ID does not match the reviewed finding.')
         if not proposal.execution_safe:
             errors.append(result.reason or 'The model marked this proposal unsafe.')
         proposals.append(ValidatedProposal(**{**proposal.model_dump(), 'execution_safe': not errors},
-                                            finding_title=finding.title, validation_errors=errors))
+                                            finding_title=finding.title, validation_errors=errors, contract=contract))
     safe = sum(proposal.execution_safe for proposal in proposals)
     return TestGenerationResponse(repository=review.repository, pull_request=review.pull_request,
         head_sha=review.head_sha, findings=findings, tests=proposals, skipped_findings=skipped,
-        total_tests=len(proposals), safe_tests=safe, rejected_tests=len(proposals) - safe)
+        total_tests=len(proposals), safe_tests=safe, rejected_tests=len(proposals) - safe, contracts=contracts)

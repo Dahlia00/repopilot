@@ -62,7 +62,7 @@ class ReviewEndpointTests(unittest.TestCase):
                 return httpx.Response(200, json=METADATA)
             if request.url.path == PR_PATH + '/files':
                 return httpx.Response(200, json=self.files)
-            sources = {'README.md': '# Test project\n'}
+            sources = {'README.md': '# Test project\nchoose([]) must raise ValueError.\n'}
             for file in self.files:
                 count = max(visible_new_lines(file.get('patch') or ''), default=2)
                 sources[file['filename']] = self.full_sources.get(file['filename'], '\n'.join(['# Full source context'] * count) + '\n')
@@ -118,10 +118,12 @@ class ReviewEndpointTests(unittest.TestCase):
             generated = {'proposal': {
                 'finding_id': payload['finding_id'], 'file': payload['file'], 'framework': 'pytest',
                 'test_name': 'test_boundary',
-                'test_code': 'import pytest\nfrom sample import choose\ndef test_boundary():\n    with pytest.raises(IndexError):\n        choose([])\n',
+                'test_code': 'import pytest\nfrom sample import choose\ndef test_boundary():\n    with pytest.raises(ValueError):\n        choose([])\n',
                 'purpose': 'Characterize a boundary input.', 'expected_behavior': 'Current failure is reproduced.',
                 'execution_safe': True,
             }, 'reason': ''}
+            from test_test_generation import contract
+            generated['contract']=contract(payload['finding_id']).model_dump()
             return httpx.Response(200, json={'id':'resp_test','status':'completed','output':[{
                 'type':'message','role':'assistant','content':[{'type':'output_text','text':json.dumps(generated)}]}]})
         self.ai_handler = handler
@@ -148,7 +150,7 @@ class ReviewEndpointTests(unittest.TestCase):
                 generated = {'proposal': {
                     'finding_id': payload['finding_id'], 'file': payload['file'], 'framework': 'pytest',
                     'test_name': 'test_boundary',
-                    'test_code': 'from sample import choose\ndef test_boundary():\n    assert choose([1]) == 1',
+                    'test_code': 'import pytest\nfrom sample import choose\ndef test_boundary():\n    with pytest.raises(ValueError):\n        choose([])',
                     'purpose': 'Check singleton input.', 'expected_behavior': 'First value is returned.',
                     'execution_safe': True,
                 }, 'reason': ''}
@@ -160,6 +162,9 @@ class ReviewEndpointTests(unittest.TestCase):
                     'fixed_code': 'def choose(values):\n    if not values:\n        raise ValueError("Nonempty input required")\n    return values[0]',
                     'confidence': 90, 'safe_to_verify': True,
                 }, 'reason': ''}
+            if name == 'ModelProposal':
+                from test_test_generation import contract
+                generated['contract']=contract(payload['finding_id']).model_dump()
             return httpx.Response(200, json={'id':'resp_fix','status':'completed','output':[{
                 'type':'message','role':'assistant','content':[{'type':'output_text','text':json.dumps(generated)}]}]})
         self.ai_handler = handler
@@ -173,6 +178,119 @@ class ReviewEndpointTests(unittest.TestCase):
         self.assertEqual(payload['evidence'][0]['source'], 'AI')
         self.assertEqual(len(payload['unexecuted_test_proposals']), 1)
         self.assertEqual(response.json()['test_proposals_used'], 1)
+
+    def test_verify_fixes_endpoint_uses_same_snapshot_and_proposals(self):
+        from verification import VerificationResponse
+        from fix_generation import FixGenerationResponse
+        from test_generation import TestGenerationResponse
+        generated_tests = TestGenerationResponse(repository='Dahlia00/repopilot', pull_request=1,
+            head_sha='a'*40, findings=[], tests=[], skipped_findings=[], total_tests=0, safe_tests=0, rejected_tests=0)
+        generated_fixes = FixGenerationResponse(repository='Dahlia00/repopilot', pull_request=1,
+            head_sha='a'*40, fixes=[], skipped_findings=[], total_fixes=0, safe_fixes=0, rejected_fixes=0, test_proposals_used=0)
+        verified = VerificationResponse(repository='Dahlia00/repopilot', pull_request=1, head_sha='a'*40,
+            results=[], fixes_verified=0, passed=0, failed=0, skipped=0)
+        with patch('main.generate_tests', new=AsyncMock(return_value=generated_tests)), \
+             patch('main.generate_fixes', new=AsyncMock(return_value=generated_fixes)), \
+             patch('main.verify_fixes', new=AsyncMock(return_value=verified)) as verify:
+            response = self.client.post('/verify-fixes', json={'repository':'Dahlia00/repopilot','pull_request':1})
+        self.assertEqual(response.status_code, 200, response.text)
+        fixes, snapshot, tests = verify.await_args.args
+        self.assertEqual(snapshot.commit, fixes.head_sha)
+        self.assertEqual(snapshot.commit, tests.head_sha)
+        self.assertEqual(fixes.pull_request, 1)
+
+    def test_verify_fixes_missing_key(self):
+        del app.dependency_overrides[get_openai_client]
+        with patch.dict(os.environ, {'OPENAI_API_KEY': ''}):
+            response = self.client.post('/verify-fixes', json={'repository':'Dahlia00/repopilot','pull_request':1})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(self.ai_requests, [])
+
+    def test_direct_verification_passes_without_openai_or_api_key(self):
+        from test_verification import fix, tests, scans
+        self.full_sources['sample.py'] = 'def choose(values):\n    return values[0]\n'
+        del app.dependency_overrides[get_openai_client]
+        payload = {'repository':'Dahlia00/repopilot','pull_request':1,'head_sha':'a'*40,
+                   'finding':FINDING,'validated_fix':fix().model_dump(),
+                   'validated_test':tests().tests[0].model_dump()}
+        with patch.dict(os.environ, {'OPENAI_API_KEY': ''}), \
+             patch('main.review_patches',new=AsyncMock(side_effect=AssertionError('OpenAI must not run'))), \
+             patch('main.generate_tests',new=AsyncMock(side_effect=AssertionError('Generation must not run'))), \
+             patch('main.generate_fixes',new=AsyncMock(side_effect=AssertionError('Generation must not run'))), \
+             patch('verification.run_static_analysis',new=AsyncMock(side_effect=[scans(),scans()])):
+            response=self.client.post('/verify-fix',json=payload)
+        self.assertEqual(response.status_code,200,response.text)
+        body=response.json()
+        # Restricted shells cannot initialize another OS sandbox; fail closed.
+        if body['status'] == 'SKIPPED' and 'sandbox' in body['verification_summary']:
+            self.skipTest(body['verification_summary'])
+        self.assertEqual(body['status'],'PASSED',body)
+        self.assertTrue(body['safe_to_apply'])
+        self.assertEqual(body['generated_test']['failed'],1)
+        self.assertEqual(body['regression_tests']['passed'],1)
+        self.assertEqual(self.ai_requests,[])
+
+    def test_generate_fixes_reuses_matching_test_artifacts(self):
+        from test_verification import tests
+        from test_test_generation import review as sample_review
+        from fix_generation import FixGenerationResponse
+        ai = sample_review()
+        ai.repository = 'Dahlia00/repopilot'
+        artifacts = tests()
+        artifacts.repository = 'Dahlia00/repopilot'
+        empty = FixGenerationResponse(repository=ai.repository,pull_request=1,head_sha='a'*40,
+            fixes=[],skipped_findings=[],total_fixes=0,safe_fixes=0,rejected_fixes=0,test_proposals_used=0)
+        with patch('main.review_patches',new=AsyncMock(return_value=ai)), \
+             patch('main.generate_tests',new=AsyncMock(side_effect=AssertionError('Must reuse tests'))), \
+             patch('main.generate_fixes',new=AsyncMock(return_value=empty)) as generate:
+            response=self.client.post('/generate-fixes',json={'repository':ai.repository,'pull_request':1,
+                'test_artifacts':artifacts.model_dump()})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(generate.await_args.args[2].tests,artifacts.tests)
+
+    def test_stale_test_artifacts_rejected_before_ai_generation(self):
+        from test_verification import tests
+        artifacts = tests(head_sha='b'*40)
+        artifacts.repository='Dahlia00/repopilot'
+        response=self.client.post('/generate-fixes',json={'repository':artifacts.repository,'pull_request':1,
+            'test_artifacts':artifacts.model_dump()})
+        self.assertEqual(response.status_code,409)
+        self.assertEqual(self.ai_requests,[])
+
+    def test_direct_verification_rejects_stale_or_mismatched_artifacts(self):
+        from test_verification import fix, tests
+        payload = {'repository':'Dahlia00/repopilot','pull_request':1,'head_sha':'b'*40,
+                   'finding':FINDING,'validated_fix':fix().model_dump(),
+                   'validated_test':tests().tests[0].model_dump()}
+        response=self.client.post('/verify-fix',json=payload)
+        self.assertEqual(response.status_code,409)
+        payload['head_sha']='a'*40
+        payload['validated_test']['file']='other.py'
+        self.assertEqual(self.client.post('/verify-fix',json=payload).status_code,422)
+        self.assertEqual(self.ai_requests,[])
+
+    def test_direct_verification_without_test_is_not_approved(self):
+        from test_verification import fix
+        self.full_sources['sample.py'] = 'def choose(values):\n    return values[0]\n'
+        payload = {'repository':'Dahlia00/repopilot','pull_request':1,'head_sha':'a'*40,
+                   'finding':FINDING,'validated_fix':fix().model_dump()}
+        response=self.client.post('/verify-fix',json=payload)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()['status'],'SKIPPED')
+        self.assertFalse(response.json()['safe_to_apply'])
+        self.assertEqual(self.ai_requests,[])
+
+    def test_direct_verification_rechecks_claimed_safe_code(self):
+        from test_verification import fix, tests
+        self.full_sources['sample.py'] = 'def choose(values):\n    return values[0]\n'
+        payload = {'repository':'Dahlia00/repopilot','pull_request':1,'head_sha':'a'*40,
+                   'finding':FINDING,'validated_fix':fix(fixed_code='def choose(values):\n    return eval(values)').model_dump(),
+                   'validated_test':tests().tests[0].model_dump()}
+        response=self.client.post('/verify-fix',json=payload)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertFalse(response.json()['safe_to_apply'])
+        self.assertEqual(response.json()['status'],'FAILED')
+        self.assertEqual(self.ai_requests,[])
 
     def test_generate_fixes_missing_key_and_github_failure(self):
         self.github_error = 404
@@ -208,7 +326,7 @@ class ReviewEndpointTests(unittest.TestCase):
             self.assertEqual(payload['patch'], file['patch'])
             self.assertIn('# Full source context', payload['full_changed_file']['content'])
             self.assertEqual(payload['repository_context'][0]['path'], 'README.md')
-            self.assertEqual(payload['repository_context'][0]['content'], '# Test project\n')
+            self.assertEqual(payload['repository_context'][0]['content'], '# Test project\nchoose([]) must raise ValueError.\n')
             self.assertFalse(body['store'])
             self.assertNotIn('tools', body)
             schema = body['text']['format']

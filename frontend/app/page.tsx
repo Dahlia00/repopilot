@@ -1,7 +1,8 @@
 'use client';
 import { useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import ProposedFixes, { type FixGeneration } from './proposed-fixes';
+import Verification, { type FixVerification } from './fix-verification';
+import ProposedFixes, { type FixGeneration, type FixArtifact } from './proposed-fixes';
 import GeneratedTests, { type TestGeneration } from './generated-tests';
 import StaticAnalysis, {
   ReviewSummary,
@@ -68,7 +69,10 @@ export default function Home() {
   const [fixes, setFixes] = useState<FixGeneration | null>(null);
   const [fixing, setFixing] = useState(false);
   const [fixError, setFixError] = useState('');
-  const busy = loading || reviewing || generating || fixing;
+  const [verification, setVerification] = useState<FixVerification | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [verificationError, setVerificationError] = useState('');
+  const busy = loading || reviewing || generating || fixing || verifying;
 
   function clearResults() {
     setAnalysis(null);
@@ -77,6 +81,8 @@ export default function Home() {
     setReviewError('');
     setFixes(null);
     setFixError('');
+    setVerification(null);
+    setVerificationError('');
     setGenerated(null);
     setGenerationError('');
   }
@@ -135,6 +141,8 @@ export default function Home() {
     setReviewError('');
     setFixes(null);
     setFixError('');
+    setVerification(null);
+    setVerificationError('');
     setGenerated(null);
     setGenerationError('');
     setReviewing(true);
@@ -214,12 +222,15 @@ export default function Home() {
     if (!review || busy) return;
     setFixes(null);
     setFixError('');
+    setVerification(null);
+    setVerificationError('');
     setFixing(true);
     try {
       const response = await fetch(`${apiUrl.replace(/\/$/, '')}/generate-fixes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repository: review.repository, pull_request: review.pull_request }),
+        body: JSON.stringify({ repository: review.repository, pull_request: review.pull_request,
+          test_artifacts: generated ?? undefined }),
         signal: AbortSignal.timeout(780000),
       });
       if (!response.ok) {
@@ -234,6 +245,44 @@ export default function Home() {
           : err instanceof Error ? err.message : 'Fix generation failed.');
     } finally {
       setFixing(false);
+    }
+  }
+
+  async function verifyFixProposal(fix: FixArtifact) {
+    if (!fixes || !fix.finding || busy) return;
+    setVerification(null);
+    setVerificationError('');
+    setVerifying(true);
+    try {
+      const artifacts = fixes.test_artifacts;
+      const relatedTest = artifacts?.tests.find(test => test.execution_safe &&
+        artifacts.findings.some(finding => finding.finding_id === test.finding_id &&
+          finding.file === fix.file && finding.line === fix.finding?.line));
+      const response = await fetch(`${apiUrl.replace(/\/$/, '')}/verify-fix`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repository: fixes.repository, pull_request: fixes.pull_request, head_sha: fixes.head_sha,
+          finding: fix.finding, validated_fix: fix, validated_test: relatedTest ?? null,
+        }),
+        signal: AbortSignal.timeout(210000),
+      });
+      if (!response.ok) {
+        const body: { detail?: unknown } = await response.json().catch(() => ({}));
+        throw new Error(typeof body.detail === 'string' ? body.detail : `Verification failed (HTTP ${response.status}).`);
+      }
+      const result = (await response.json()) as FixVerification['results'][number];
+      setVerification({ repository: fixes.repository, pull_request: fixes.pull_request, head_sha: fixes.head_sha,
+        results: [result], fixes_verified: result.status === 'SKIPPED' ? 0 : 1,
+        passed: result.status === 'PASSED' ? 1 : 0, failed: result.status === 'FAILED' ? 1 : 0,
+        skipped: result.status === 'SKIPPED' ? 1 : 0 });
+    } catch (err) {
+      setVerificationError(err instanceof TypeError ? 'Could not connect to RepoPilot API.'
+        : err instanceof Error && ['TimeoutError', 'AbortError'].includes(err.name)
+          ? 'Deterministic verification timed out. Please try again.'
+          : err instanceof Error ? err.message : 'Verification failed.');
+    } finally {
+      setVerifying(false);
     }
   }
 
@@ -437,7 +486,7 @@ export default function Home() {
               <button type="button" disabled={busy} onClick={generateFixProposals}>
                 {fixing ? 'Generating fixes…' : 'Generate fix proposals'}
               </button>
-              <p className="muted small">Refreshes AI and static review, generates test evidence, then proposes local fixes.</p>
+              <p className="muted small">Generates fixes with AI review and reuses your generated tests when available. Verification is a separate action on each proposal.</p>
             </div>
             <ReviewSummary summary={review.summary} />
             <ReviewFindings
@@ -474,9 +523,12 @@ export default function Home() {
         {generated && <GeneratedTests result={generated} />}
         {fixing && <p className="empty muted" role="status">Refreshing review and test evidence, then validating fix proposals…</p>}
         {fixError && <p className="error" role="alert">{fixError}</p>}
-        {fixes && <ProposedFixes result={fixes} />}
+        {fixes && <ProposedFixes result={fixes} onVerify={verifyFixProposal} busy={busy} />}
+        {verifying && <p className="empty muted" role="status">Checking the existing fix and tests in temporary workspaces; no AI regeneration…</p>}
+        {verificationError && <p className="error" role="alert">{verificationError}</p>}
+        {verification && <Verification result={verification} />}
         <footer>
-          RepoPilot <span>Milestone 07 · AI Auto-Fix proposals</span>
+          RepoPilot <span>Milestone 08 · Fix verification</span>
         </footer>
       </main>
     </div>

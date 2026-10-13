@@ -7,12 +7,22 @@ import httpx
 from fastapi import HTTPException
 from openai import AsyncOpenAI
 
-from context import FullChangedFile, RepositoryContext
+from context import FullChangedFile, RepositoryContext, ContextFile, ContextMetadata
+from contracts import BehavioralContract, BehaviorCase
 from review import Finding, ReviewResponse
 from test_generation import TestProposal, generate_tests, identified, target_for, validate_code
 
 SOURCE = 'def choose(values):\n    return values[0]\n'
-VALID = 'import pytest\nfrom sample import choose\n\ndef test_empty():\n    with pytest.raises(IndexError):\n        choose([])\n'
+VALID = 'import pytest\nfrom sample import choose\n\ndef test_empty():\n    with pytest.raises(ValueError):\n        choose([])\n'
+
+
+QUOTE = 'choose([]) must raise ValueError.'
+def contract(finding_id=None):
+    return BehavioralContract(finding_id=finding_id or identified(review().findings)[0].finding_id,
+        file='sample.py',function='choose',current_behavior='Empty input raises IndexError.',
+        problem='Required validation is missing.',desired_behavior=QUOTE,desired_behavior_confidence=95,
+        contract_source='repository_context',evidence_path='README.md',evidence_quote=QUOTE,
+        cases=[BehaviorCase(arguments=[[]],outcome='raises',exception='ValueError')],behavior_ambiguous=False)
 
 
 def proposal(code=VALID, **overrides):
@@ -29,13 +39,13 @@ def review(category='Bug', file='sample.py'):
         author='owner', base_branch='main', head_branch='feature', head_sha='a'*40,
         head_repository='owner/repo', changed_files=1, additions=1, deletions=0, files=[],
         files_truncated=False, findings=[finding], reviewed_files=[file], skipped_files=[],
-        model='test', repository_context=[], context_warnings=[], skipped_file_details=[], input_characters=0)
+        model='test', repository_context=[ContextMetadata(path='README.md',reason='Contract',used_for=[file])], context_warnings=[], skipped_file_details=[], input_characters=0)
 
 
 def repository():
     return RepositoryContext(repository='owner/repo', commit='a'*40,
         changed_files=[FullChangedFile(path='sample.py', status='modified', patch='@@ -1 +1 @@\n+change', content=SOURCE)],
-        context_files=[], warnings=[])
+        context_files=[ContextFile(path='README.md',reason='Contract',content=QUOTE)], warnings=[])
 
 
 class ValidationTests(unittest.TestCase):
@@ -110,7 +120,7 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
                 'finding_id': payload['finding_id'], 'file': payload['file'], 'framework': 'pytest',
                 'test_name': 'test_empty', 'test_code': code, 'purpose': 'Characterize empty input.',
                 'expected_behavior': 'Current error is observed.', 'execution_safe': True,
-            }, 'reason': ''}
+            }, 'reason': '', 'contract':contract(payload['finding_id']).model_dump()}
             if transform:
                 data = transform(data)
             return httpx.Response(200, json={'id':'resp_test','object':'response','created_at':1,
@@ -159,7 +169,7 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.status_code, 502)
 
     async def test_model_decline_and_unsafe_assessment(self):
-        result = await self.generate(lambda data: {'proposal':None, 'reason':'Not deterministic.'})
+        result = await self.generate(lambda data: {**data, 'proposal':None, 'reason':'Not deterministic.'})
         self.assertEqual(result.tests, [])
         self.assertEqual(result.skipped_findings[0].reason, 'Not deterministic.')
         def transform(data):
@@ -168,6 +178,23 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
             return data
         result = await self.generate(transform)
         self.assertEqual(result.rejected_tests, 1)
+
+    async def test_ambiguous_behavior_does_not_generate_characterization_test(self):
+        def transform(data):
+            data['contract']['contract_source']='inferred'
+            return data
+        result=await self.generate(transform)
+        self.assertEqual(result.tests,[])
+        self.assertTrue(result.contracts[0].behavior_ambiguous)
+        self.assertIn('behavior_ambiguous',result.skipped_findings[0].reason)
+
+    async def test_regression_test_must_match_desired_not_current_behavior(self):
+        def transform(data):
+            data['proposal']['test_code']=data['proposal']['test_code'].replace('ValueError','IndexError')
+            return data
+        result=await self.generate(transform)
+        self.assertEqual(result.rejected_tests,1)
+        self.assertIn('desired behavioral contract',result.tests[0].validation_errors[0])
 
     async def test_input_budget_skips_generation(self):
         with patch('test_generation.MAX_INPUT_CHARS', 1):

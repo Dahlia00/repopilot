@@ -1,8 +1,8 @@
 # RepoPilot
 
-AI-powered code review and debugging assistant — milestone 7: AI Auto-Fix proposal generation.
+AI-powered code review and debugging assistant — milestone 8: isolated fix verification.
 
-RepoPilot fetches real GitHub PR metadata and changed files, displays expandable patches, combines repository-aware AI review with local Bandit and optional Semgrep scans, and generates statically validated pytest and local code-fix proposals on request. Public GitHub repositories work without a GitHub token. AI review requires a backend OPENAI_API_KEY. This milestone only reads and analyzes: it does not modify files or the PR, post GitHub comments, or include agents, a database, or Docker.
+RepoPilot fetches real GitHub PR metadata and changed files, displays expandable patches, combines repository-aware AI review with local Bandit and optional Semgrep scans, generates statically validated pytest and local code-fix proposals, and verifies eligible fixes with restricted pytest execution and before/after scans in disposable workspaces. Public GitHub repositories work without a GitHub token. AI review requires a backend OPENAI_API_KEY. Verification runs only in temporary workspaces; it does not modify the analyzed repository or the PR, post GitHub comments, or include agents, a database, or Docker.
 
 ## Requirements
 
@@ -55,6 +55,9 @@ Open http://localhost:3000.
 
 13. Click **Generate fix proposals**. This performs a fresh review and static scan, generates eligible test evidence, and proposes small Python fixes.
 14. Inspect **Proposed fixes**: related finding/source, confidence, validation badge, original/proposed code, server-generated unified diff, and rejected/skipped reasons. There is no Apply button. SQL fixes may be declined when the database API or contract is unknown.
+
+15. Click **Verify this fix** on an existing proposed-fix card. This sends the exact existing proposal, finding, head SHA and related generated test to `/verify-fix`. Verification does not call OpenAI or regenerate artifacts.
+16. Inspect **Fix verification**: exact proposal checked, syntax result, generated test before the fix, regression test after the fix, Bandit/Semgrep before → after, PASSED/FAILED/SKIPPED counts, and safe-to-apply YES/NO. Missing tests, unsafe source, unsupported OS isolation, scanner errors, or failing tests prevent approval.
 
 For the intentionally unsafe `samples/insecure_example.py`, inspect whether the model reports SQL injection in `get_user()` and unsafe empty-list indexing in `first_result()`. These are expected review targets, not hardcoded findings or guaranteed outputs. Model results may vary. If the PR changes, the reviewed code also changes.
 
@@ -223,7 +226,7 @@ For example, if AI and Bandit both identify the same issue at the same line, bot
 
 Supported findings are **Python Bug and Error Handling** issues with a reliable line identifying a top-level function in a conservatively inspected module. The source module must contain simple function definitions/docstrings without imports, decorators, defaults, import-time annotations, top-level executable statements, external calls, or unsupported constructs. This intentionally excludes many legitimate but complex files until execution isolation is added.
 
-For eligible findings, the model receives the finding, exact target module/function, full changed-file content, patch, and available context used in the review. It proposes a minimal pytest test or declines with a reason. Tests characterize deterministic behavior, validation failures, and boundary inputs; they do not invent a new contract when expected behavior is undocumented. Up to five findings are attempted. Security, performance, code-quality, non-Python, missing-source/line, and unsupported-source findings are reported as skipped rather than forced into tests.
+For eligible findings, the model receives the finding, exact target module/function, full changed-file content, patch, and available context used in the review. It proposes a minimal pytest test or declines with a reason. Tests must encode evidence-bound desired post-fix behavior for deterministic validation failures and boundary inputs. Undocumented behavior is marked ambiguous; characterization tests of current bugs are not generated as regression tests. Up to five findings are attempted. Security, performance, code-quality, non-Python, missing-source/line, and unsupported-source findings are reported as skipped rather than forced into tests.
 
 Each proposal contains `finding_id`, `file`, `framework: "pytest"`, `test_name`, `test_code`, `purpose`, `expected_behavior`, and `execution_safe`. The backend adds the related finding title and validation errors. IDs are derived from the refreshed finding; proposals are validated against its exact ID/path. The response includes the reviewed findings, captured head SHA, tests, skipped findings, and total/safe/rejected test counts. Unsupported findings and model declines are skipped, not counted as rejected code proposals.
 
@@ -242,7 +245,7 @@ Generation inputs are limited to 60,000 characters per request and 120,000 cumul
 
 Keep the backend running with `OPENAI_API_KEY` set. At http://localhost:3000, enter **Dahlia00/repopilot** and **1**, click **Fetch Pull Request**, then **Analyze with AI**, then **Generate tests**.
 
-If the refreshed AI review identifies the empty-collection indexing issue, the generator can propose a pytest characterization of that failure from the actual code and finding. SQL-injection/security findings are skipped by the eligibility filter. The system does not create an indexing finding if the model misses it, nor hardcode a sample-specific test. Model results may vary; zero proposals with explicit skip reasons is valid.
+If the refreshed AI review identifies empty-collection indexing, the generator proposes a regression test only when repository documentation or existing tests establish the desired behavior. Otherwise it records an ambiguous contract and skips regression generation. SQL-injection/security findings are skipped by the eligibility filter. The system does not create an indexing finding if the model misses it, nor hardcode a sample-specific test. Model results may vary; zero proposals with explicit skip reasons is valid.
 
 Direct API test:
 
@@ -252,7 +255,7 @@ curl -X POST http://localhost:8000/generate-tests \
   -d '{"repository":"Dahlia00/repopilot","pull_request":1}'
 ```
 
-No pytest installation is required to generate or validate proposals. Generated code is not saved in the analyzed repository and is never included in the backend test runner; validation tests use inert synthetic strings and mocked model responses.
+No pytest installation is required for the generation-only endpoint. Milestone 8 installs pytest for explicit isolated verification. Generated code is never saved in the analyzed repository or added to its test suite; generation validation tests use inert synthetic strings and mocked model responses.
 
 ## Milestone 6 architecture
 
@@ -330,7 +333,7 @@ The original snippet must exactly match the source function. The replacement mus
 
 AST checks reject newly introduced imports, nested functions/classes, async/global changes, reflection, callable/import rebinding, and attribute mutation. New calls are restricted to a conservative set of pure builtins and standard exceptions; existing calls can remain for local fixes, but new or modified dangerous calls are rejected, including known imported aliases. Checks cover subprocess/shell execution, eval/exec, dynamic execution, filesystem writes/deletion, network modules, suspicious shell strings, credential assignments, and recognizable secret formats. This conservative approach can reject a valid fix requiring an unfamiliar external API; the proposal is displayed as rejected rather than applied.
 
-`safe_to_verify` means static checks passed, **not** proof of correctness, absence of secrets, or safety to execute. Static validation cannot resolve every indirect call or certify existing module side effects. Human review remains necessary. RepoPilot does not apply, run, commit, push, comment, or create PRs for proposals, and does not run generated tests. No database, agents, or Docker execution are added.
+`safe_to_verify` means static checks passed, **not** proof of correctness, absence of secrets, or safety to execute. Static validation cannot resolve every indirect call or certify existing module side effects. Human review remains necessary. The generation endpoints do not apply or run proposals/tests, commit, push, comment, or create PRs. Only the explicit Milestone 8 verification endpoint can execute eligible code/tests inside its restricted temporary sandbox. No database, agents, or Docker execution are added.
 
 Limits: up to five combined issues, 4,000 characters per original/replacement function, 1,000 replacement AST nodes, 60,000 input characters per fix call (including schema/instructions), 120,000 total fix input characters, and 4,000 output tokens per call. Existing repository, scanner, review, and test-generation limits remain in force. Fix generation has a 180-second overall limit after review/test evidence; the frontend permits up to 13 minutes for the full request. API errors and malformed/incomplete JSON return useful sanitized errors. Rejected proposals remain inspectable; declined/unsupported findings have explicit reasons.
 
@@ -356,9 +359,106 @@ curl --max-time 780 -X POST http://127.0.0.1:8000/generate-fixes \
 
 Inspect proposals for empty-list handling and any justified SQL fix or explicit context-based decline. Model output can vary; checks do not require a predetermined fix. Use the frontend steps above to inspect each proposal without executing it.
 
+## Fix verification (Milestone 8)
+
+`POST /verify-fix` is the primary deterministic verification endpoint. It accepts existing finding/fix/test artifacts and their head SHA, checks the current PR metadata against that SHA, retrieves the selected changed file from GitHub, and delegates to `backend/verification.py`. It has no OpenAI client dependency, makes zero OpenAI calls, and works without `OPENAI_API_KEY`. The core `verify_one` function already accepts repository metadata/full source plus validated fix/test data and performs no AI generation. For trusted internal callers with an immutable snapshot, the core requires no GitHub call either. The older `/verify-fixes` endpoint remains an optional generation-and-verification orchestrator; it still calls OpenAI and is no longer used by the frontend verification action. The direct endpoint treats client safety flags as untrusted, reruns all validation, and uses authoritative GitHub source rather than browser-supplied full-file content. A changed head returns HTTP 409; mismatched files/findings/source return 422. It never runs code from the working RepoPilot checkout. Each fix is verified independently against the original snapshot; combining several fixes is outside this milestone.
+
+### Shared behavioral contracts and compatibility
+
+Test generation extracts a structured behavioral contract in the same model response as the test proposal. It includes finding ID/file/function, current behavior, problem, desired behavior, confidence, source, exact evidence path/quote, concrete literal input/outcome cases, and `behavior_ambiguous`. The desired behavior must quote explicit repository documentation or existing tests verbatim. The backend checks identity, quote presence in retrieved authoritative source, confidence of at least 90, and concrete cases. Python implementation text is not a specification: Python evidence must be a docstring, or matching assertions from an existing test. A finding recommendation, inferred behavior, missing/invalid evidence, low confidence, or missing contract remains ambiguous. No exception type, return value, repository, or function is special-cased.
+
+Generated regression code must assert the desired cases directly (literal equality/identity assertions or an exact `pytest.raises` target call). Unknown behavior produces no regression proposal rather than a characterization test asserting today's bug. Fix generation receives the **same unchanged contract** with test artifacts. It may return a useful assumption-bearing fix for human review when behavior is ambiguous, but such a proposal cannot receive automatic approval.
+
+Each fix carries `compatibility: {compatible, reason, behavior_ambiguous}`. Verification recomputes this metadata and does not trust the submitted result. Before workspace creation or execution, it requires identical test/fix contracts, authoritative evidence, matching test expectations, and matching fixed-code outcomes. A small bounded AST constant-propagation checker supports literal inputs, simple assignments, collection indexing, guards/conditional returns, comparisons, len/bool, and explicit builtin raises. It never compiles/evals/imports generated code. Unsupported semantics fail closed. Cases are deliberately limited to JSON scalars and flat lists of scalars; nested/object inputs or unsupported assertions cannot be auto-approved. Cases that already satisfy the contract before the fix are not regression evidence. This check does not prove arbitrary Python semantics or replace actual sandboxed fail-before/pass-after tests and scanner checks.
+
+Missing contracts on older artifacts are treated as ambiguous; old characterization expectations are never rewritten to match a fix. For PR #1, undocumented empty-input behavior is allowed to remain `safe_to_apply=false`. A synthetic fixture with explicit documented desired behavior exercises the complete fail-before/pass-after sandbox and scanner pipeline without OpenAI. The frontend shows current/desired behavior, evidence source/confidence, ambiguity, and compatibility reasons.
+
+### Isolation and execution gate
+
+For each fix, exact original-source matching, Python AST syntax, signatures, and Milestone 7 safety checks are rerun. Verification has its own explicit AST allowlist: ordinary `if`/`return`, boolean checks, comparisons, simple assignments, safe builtin calls/exceptions, and conditional expressions (`ast.IfExp`) are supported. Both branches of conditional expressions receive the same safety checks. Rejections include structured `safety_violations` with before/after phase, AST node, line, rejected call/name, and safety rule; the summary also displays these details. Imports, attribute access, reflection, external calls, and unsupported constructs remain rejected. Both original and reconstructed full files must pass a stricter execution gate: only plain function definitions/docstrings and restricted pure Python expressions/control flow, no imports, attributes, decorators, annotations/default-expression effects, external calls, or module-level execution. The execution gate also rejects numeric literals above 10,000, range construction, multiplication/exponentiation/percent-formatting/shifts, and potentially expanding variable-to-variable concatenation to reduce allocation risks where portable memory limits are unavailable. Unsupported code is skipped, even if its proposal previously passed static validation.
+
+Only previously accepted tests that refer to a finding in the same function/file and immutable commit are considered. Test syntax/import/call restrictions are rerun using the Milestone 6 validator. Related rejected or dangerous tests are never executed. Test code and expectations are never silently rewritten.
+
+A `TemporaryDirectory` holds separate **before** and **after** workspaces. Only the full target source, selected generated test files, empty package initializers, empty pytest config, and trusted runner/probe/report files are created. The replacement is applied only to the after-copy. Repository tests, actual package initializers, conftest files, dependencies, other modules, and repository configuration are not copied. Source paths are checked for traversal, absolute paths, reserved module names, and excessive nesting. Temporary workspaces are removed on success, failure, cancellation, and timeout.
+
+Execution currently requires **macOS `/usr/bin/sandbox-exec`**. It is deprecated by Apple and may not be available/permitted on every machine. Other platforms or a failed isolation probe return SKIPPED with `safe_to_apply=false`; there is no unsandboxed fallback. The sandbox denies network connections and filesystem writes outside the variant workspace. User-data reads under `/Users` are denied except the trusted Python virtual environment and temporary workspace; system runtime reads and trusted Python launcher operations are permitted. Restricted AST validation is an additional gate, not a general-purpose arbitrary-code sandbox. Backend API keys/tokens and Python/pytest configuration environment variables are never inherited.
+
+The trusted runner invokes pytest with plugin autoload disabled, `--noconftest`, an empty explicit config, a temporary root/confcutdir, plain assertions, bytecode/cache writes disabled, and only explicit generated test files. [Pytest documents plugin autoload controls here](https://docs.pytest.org/en/8.4.x/how-to/plugins.html). A trusted report records collected/passed/failed/error counts; collection/import failures never count as successfully reproducing an issue.
+
+### Tools and limits
+
+Known application code invokes pytest through a hardcoded runner and existing Bandit/Semgrep adapters through fixed argument lists. No command is taken from model output and no shell is invoked. Scanners inspect disposable full-source copies before and after; Semgrep uses the existing local rules and is optional when consistently unavailable. Bandit is required for approval.
+
+Limits: five fixes, five tests per fix, 24 KB source, 32 constructed files including reserved runner/probe/report slots, 256 KB input workspace content, maximum five path components, 1,500 source AST nodes, and existing fix/test size limits. Each subprocess has a 10-second wall timeout, a 5-second CPU limit in the pytest runner, a 256 KB per-file output limit, 64 file descriptors, and core dumps disabled. Captured stdout/stderr are limited to 32 KB each, and temporary absolute paths are redacted. Existing scanner time/output/file limits remain active. CPU/time limits are enforced; a portable hard memory limit is not claimed on macOS. Direct verification has a 100-second core deadline after bounded GitHub retrieval; the frontend allows 210 seconds for that deterministic request. The optional legacy orchestrator retains its six-minute verification deadline after generation. No OpenAI timeout is raised or extended by the direct verification stage. Timeout/cancellation kills active process groups before directory cleanup.
+
+### `safe_to_apply` decision
+
+Approval requires **all** of these:
+
+- Fix/source and related tests pass fresh syntax, identity, snapshot, and execution safety checks.
+- OS isolation succeeds and the related tests genuinely fail before the fix (pytest test failure, not collection error, crash, or timeout).
+- All selected tests pass after the fix with at least one collected test and no errors.
+- Bandit completes successfully before and after. Semgrep completes both scans when available; errors, partial scans, or changing availability prevent approval.
+- No new HIGH/CRITICAL findings are introduced by either scanner. Unchanged source lines are mapped before → after so line shifts do not invent regressions or hide newly introduced severe findings.
+
+Syntax alone never approves a fix. If tests pass both before and after, verification is incomplete and SKIPPED. A characterization test incompatible with an explicit desired contract is rejected before execution; missing contracts are ambiguous and SKIPPED. Actual sandboxed test failures still produce FAILED and `safe_to_apply=false`, never an invented pass. The same checks apply generically to all eligible fixes; no sample-specific outcome is hardcoded. The flag applies only to the exact supplied proposal and head commit included in the verification result, not to other proposals, a combination of fixes, or a future repository state. It is evidence from limited generated tests and configured scanner rules, not proof of every behavior or permission to apply a change.
+
+The response contains each fix title/ID/file, the exact proposal checked, status, syntax check, generated baseline test, fixed regression test, Bandit/Semgrep before and after checks/findings, summary, and `safe_to_apply`, plus verified/passed/failed/skipped counts.
+
+### Milestone 8 architecture
+
+```text
+AI stages (OPENAI_API_KEY required)
+  /review → findings/context
+  /generate-tests → test artifacts
+  /generate-fixes → fix artifacts + matching test_artifacts
+    reuses supplied test_artifacts when repository/PR/head match
+Deterministic stage (no OpenAI API key or calls)
+  /verify-fix: existing head_sha + finding + validated_fix + optional validated_test
+    GitHub: authoritative PR head and selected changed source
+    verification.py: revalidation → temporary before/after sandbox
+    pytest + Bandit / optional Semgrep → structured result
+Frontend: Analyze → Generate tests → Generate fixes → Verify this fix
+```
+
+Install the new pytest dependency and start/restart your backend:
+
+```sh
+cd backend
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+# Configure OPENAI_API_KEY using the hidden prompt documented above.
+python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Start the frontend with the existing commands, enter `Dahlia00/repopilot` and PR `1`, then **Fetch Pull Request → Analyze with AI → Generate tests → Generate fix proposals → Verify this fix**. Fix generation reuses the generated test response when supplied; its returned `test_artifacts` are retained alongside each fix. Verification reuses those artifacts and cannot trigger review/generation. Generation still needs OpenAI; verification does not. For the empty-list issue, inspect whether generated tests reproduce the bug and actually pass with the proposed contract; a legitimate FAILED/SKIPPED result is expected when evidence is unsuitable. Rejected SQL proposals remain skipped and are not executed.
+
+Direct API check, using saved generation responses rather than generating anything inside verification:
+
+Create `verification-request.json` with these fields (copy values from existing responses):
+
+```text
+repository: owner/repository
+pull_request: PR number
+head_sha: generation response's immutable commit
+finding: fix.finding from /generate-fixes
+validated_fix: selected fix object from /generate-fixes
+validated_test: related test object from test_artifacts.tests, or null
+```
+
+```sh
+curl --max-time 210 -X POST http://127.0.0.1:8000/verify-fix \
+  -H 'Content-Type: application/json' \
+  --data-binary @verification-request.json
+```
+
+The request contains code as data; do not execute the JSON or its code fields. Missing tests produce SKIPPED, and characterization tests can correctly produce FAILED. Previously generated artifacts can be verified while OpenAI is unavailable. No database or server-side artifact cache is introduced; the frontend retains artifacts in memory for the current session.
+
+No Apply button, automatic repository changes, commits, pushes, GitHub comments/PRs, autonomous agents, database, or Docker execution are added.
+
 ## Checks
 
-Backend tests exercise GitHub retrieval, repository selection, full-file retrieval, fork/head snapshots, source and model budgets, exclusion rules, context failures, scanner normalization/limits/failures, conservative deduplication, generated-test and fix syntax/safety/identity/budgets, exact source matching, computed diffs, endpoint integration, and the real OpenAI SDK parser with mocked HTTP responses. One test exercises the installed Bandit CLI on a synthetic file; other scanner tests mock subprocess outputs. They need no token, API key, internet, or API spend:
+Backend tests exercise GitHub retrieval, repository selection, full-file retrieval, fork/head snapshots, source and model budgets, exclusion rules, context failures, scanner normalization/limits/failures, conservative deduplication, generated-test and fix syntax/safety/identity/budgets, exact source matching, computed diffs, verification isolation/application/cleanup, actual sandboxed pytest execution, timeouts, scanner comparisons, safe-to-apply decisions, endpoint integration, and the real OpenAI SDK parser with mocked HTTP responses. One test exercises the installed Bandit CLI on a synthetic file; other scanner tests mock subprocess outputs. They need no token, API key, internet, or API spend:
 
 ```sh
 cd backend
@@ -393,6 +493,10 @@ repopilot/
     test_test_generation.py
     fix_generation.py
     test_fix_generation.py
+    contracts.py
+    test_contracts.py
+    verification.py
+    test_verification.py
     static_analysis.py
     pipeline.py
     semgrep-rules.yml
@@ -410,6 +514,8 @@ repopilot/
       static-analysis.tsx
       generated-tests.tsx
       proposed-fixes.tsx
+      fix-verification.tsx
+      behavior-contract.tsx
     eslint.config.mjs
     next-env.d.ts
     next.config.ts

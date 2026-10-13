@@ -1,4 +1,6 @@
+import ContractDetails, { type BehavioralContract } from './behavior-contract';
 export type GeneratedProposal = {
+  contract: BehavioralContract | null;
   finding_id: string;
   finding_title: string;
   file: string;
@@ -14,6 +16,8 @@ export type TestGeneration = {
   repository: string;
   pull_request: number;
   head_sha: string;
+  findings: (import('./review-findings').Finding & { finding_id: string })[];
+  contracts: BehavioralContract[];
   tests: GeneratedProposal[];
   skipped_findings: { finding_id: string; file: string; title: string; reason: string }[];
   total_tests: number;
@@ -43,6 +47,8 @@ export default function GeneratedTests({ result }: { result: TestGeneration }) {
         Generated from a refreshed AI review at commit {result.head_sha.slice(0, 12)}. Safe means
         passed static checks; tests have not been run and still need human review.
       </p>
+      {(result.contracts ?? []).filter(contract => contract.behavior_ambiguous).map(contract =>
+        <ContractDetails key={contract.finding_id} contract={contract} />)}
       <div className="finding-list">
         {result.tests.map((test) => (
           <article className="finding" key={test.finding_id}>
@@ -57,6 +63,7 @@ export default function GeneratedTests({ result }: { result: TestGeneration }) {
             <p className="finding-location">
               <code>{test.file}</code> · {test.finding_id}
             </p>
+            <ContractDetails contract={test.contract} />
             <div className="fix">
               <span>PURPOSE</span>
               <p>{test.purpose}</p>
