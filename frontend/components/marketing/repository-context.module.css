@@ -1,0 +1,8 @@
+.eyebrow { color:#62708a; }
+.heading { margin:24px 0;max-width:540px;font-size:clamp(34px,3.3vw,49px);line-height:1.12;letter-spacing:-.04em;font-weight:600;color:#101321; }
+.heading span { color:#504bc0; }
+.description { max-width:420px;font-size:18px;line-height:1.65;color:#5f687b; }
+.legend { padding:0;margin:28px 0 0;display:flex;flex-wrap:wrap;gap:12px 18px;list-style:none;color:#52607b;font-size:12px; }
+.legend li { display:flex;align-items:center;gap:7px; }.legend li::before { content:'';width:5px;height:5px;border-radius:50%;background:#8b5cf6; }.legend li:nth-child(2)::before { background:#38cff8; }.legend li:nth-child(3)::before { background:#3978ff; }
+.illustration { margin:28px 0 0;width:100%;max-width:680px; }.illustration svg { width:100%;height:auto; }.illustration figcaption { text-align:center;color:#66738a;font:10px/1.6 var(--font-code); }
+@media(max-width:767px) { .heading { font-size:34px; }.description { font-size:17px; } }
