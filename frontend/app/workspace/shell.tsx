@@ -1,5 +1,6 @@
 import type {FormEvent, ReactNode} from 'react';
 import Link from 'next/link';
+import ProductMark from '../../components/shared/product-mark';
 import type {SectionId} from './types';
 export const sections: {id: SectionId; label: string; group: string}[] = [
   {id:'overview',label:'Overview',group:'Workspace'}, {id:'files',label:'Changed files',group:'Workspace'}, {id:'context',label:'Repository context',group:'Workspace'},
@@ -24,10 +25,8 @@ function SectionIcon({id}: {id:SectionId}) {
 }
 export function TopBar({workspace, command}: {workspace?: string; command: ReactNode}) {
   return <header className="app-topbar">
-    <Link className="app-brand" href="/" aria-label="RepoPilot home">
-      <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <path d="M7 6v12M17 6v3a4 4 0 0 1-4 4H7"/><circle cx="7" cy="4" r="2"/><circle cx="7" cy="20" r="2"/><circle cx="17" cy="4" r="2"/>
-      </svg><span>RepoPilot</span>
+    <Link className="app-brand" href="/app" aria-label="RepoPilot application">
+      <ProductMark /><span>RepoPilot</span>
     </Link>
     {command}
     <div className="chrome-meta">
