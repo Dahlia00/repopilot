@@ -1,0 +1,82 @@
+.stage {
+  position: relative;
+  width: 100%;
+  container-type: inline-size;
+  perspective: 1800px;
+  perspective-origin: 50% 40%;
+}
+.canvas {
+  position: absolute;
+  inset: 0;
+  font-size: calc(100cqi * 16 / var(--stage-w));
+  transform-style: preserve-3d;
+}
+.place {
+  position: absolute;
+  transform: translateZ(var(--z)) rotate(var(--r));
+  transform-style: preserve-3d;
+}
+.float { animation: float var(--dur) ease-in-out var(--delay) infinite alternate; }
+@keyframes float {
+  from { translate: 0 calc(var(--amp) * .5); }
+  to { translate: 0 calc(var(--amp) * -.5); }
+}
+.svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.connector { transition: opacity .45s cubic-bezier(.22, 1, .36, 1); }
+.connector[data-dimmed] { opacity: .22; }
+.halo { stroke-width: 7; stroke-linecap: round; opacity: calc(.16 * var(--halo, 1)); }
+.core { stroke-width: 1.6; stroke-linecap: round; }
+.connector[data-active] .halo { opacity: .38; stroke-width: 9; }
+.connector[data-active] .core { stroke-width: 2.2; }
+.flow {
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-dasharray: 2 26;
+  opacity: .9;
+  animation: flow 2.4s linear infinite;
+}
+@keyframes flow { to { stroke-dashoffset: -56; } }
+.packet { filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 8px currentColor); }
+.nodeGlow { opacity: .28; animation: node-pulse 2.8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes node-pulse { 50% { opacity: .1; transform: scale(1.6); } }
+
+.cube {
+  --light: #c4b5fd;
+  --mid: #8b5cf6;
+  --deep: #5b2fd0;
+  position: relative;
+  display: block;
+  aspect-ratio: 60 / 66;
+  filter: drop-shadow(0 .6em 1.1em rgba(91, 70, 230, .3));
+}
+.cube[data-tone='blue'] { --light: #c7d2fe; --mid: #6366f1; --deep: #3730a3; }
+.cube[data-tone='cyan'] { --light: #a5f3fc; --mid: #38bdf8; --deep: #2563eb; }
+.cube i { position: absolute; inset: 0; }
+.cube i[data-face='top'] {
+  clip-path: polygon(50% 3%, 96.7% 25.8%, 50% 48.5%, 3.3% 25.8%);
+  background: linear-gradient(135deg, rgba(255, 255, 255, .98), color-mix(in srgb, var(--light) 80%, transparent) 70%);
+}
+.cube i[data-face='left'] {
+  clip-path: polygon(3.3% 25.8%, 50% 48.5%, 50% 97%, 3.3% 74.2%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--light) 85%, transparent), color-mix(in srgb, var(--mid) 70%, transparent));
+}
+.cube i[data-face='right'] {
+  clip-path: polygon(96.7% 25.8%, 50% 48.5%, 50% 97%, 96.7% 74.2%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--mid) 85%, transparent), color-mix(in srgb, var(--deep) 80%, transparent));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .float, .flow, .nodeGlow { animation: none; }
+}
+
+.stage[data-active='false'] .float,.stage[data-active='false'] .flow,.stage[data-active='false'] .nodeGlow { animation-play-state:paused; }
+.halo { stroke-width:5; }.packet { filter:drop-shadow(0 0 3px currentColor); }
+@media(max-width:640px) { .stage { perspective:2200px; } }
