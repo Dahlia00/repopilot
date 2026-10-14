@@ -3,34 +3,31 @@ import type {WorkspaceData} from './data';
 import type {SectionId} from './types';
 import PipelineFlow from './pipeline-flow';
 import RepoContextGraph from './repo-context-graph';
-import SeverityRing from './severity-ring';
-import SampleReviewPanel from './sample-review-panel';
-import AnalysisSummary from '../pipeline-overview';
-export default function Overview({workspace:w,data:d,previewCount,onSelect}: {workspace:ReviewWorkspace;data:WorkspaceData;previewCount?:number;onSelect:(id:SectionId)=>void}) {
-  return <div className="overview-screen">
-    <div className="canvas-heading"><div><p className="section-kicker">Workspace / Overview</p><h1>{d.pr?d.pr.title:'Review with evidence'}</h1><p className="muted">{d.pr?`${d.pr.repository} · Pull request #${d.pr.pull_request}`:'Load a pull request to inspect changes, review findings, and verify proposals.'}</p></div>
-      {d.review || w.agents ? <span className="tag">{w.busy?'Request running':'Review complete'}</span> : null}
-    </div>
-    <PipelineFlow workspace={w} data={d} previewCount={previewCount} onSelect={onSelect}/>
-    <div className="overview-visuals">
-      <RepoContextGraph files={d.pr?.files.map(f=>f.filename) ?? []} context={d.context} loaded={!!d.pr}/>
-      {!d.hasReview?<SampleReviewPanel/>:<div className="overview-evidence">
-        <SeverityRing findings={d.findings}/>
-        <section className="recent-findings"><h2>Review observations</h2>
-          {!d.findings.length?<p className="muted">No findings returned. Check context and scanner coverage.</p>:d.findings.slice(0,3).map(f=><button type="button" className="observation-row" key={f.id} onClick={()=>onSelect('findings')} title={f.title}>
-            <span className={`severity-dot ${f.severity.toLowerCase()}`}/><span className="truncate">{f.title}</span><span className="mono muted small">{f.status}</span>
-          </button>)}
-          <button className="text-button" type="button" onClick={()=>onSelect('findings')}>View findings →</button>
-        </section>
-      </div>}
-    </div>
-    {d.hasReview && <AnalysisSummary files={d.review?.reviewed_files.length ?? new Set(d.findings.map(f=>f.file)).size}
-      filesLabel={d.review?'Files reviewed':'Files with observations'} contextFiles={d.context.length}
-      aiFindings={w.agents?w.agents.findings.filter(f=>f.evidence.some(e=>e.source==='AI')).length:d.review?.ai_findings.length ?? 0}
-      staticFindings={d.counts.static ?? 0} uniqueIssues={w.agents?undefined:d.review?.summary.unique_issues}
-      confirmed={d.verification?d.findings.filter(f=>f.status==='Verified').length:undefined}
-      tests={d.tests?.total_tests} verified={d.verification?.passed}/>}
-    {d.pr && <div className="overview-actions"><button className="secondary-button" type="button" disabled={!w.analysis || w.busy} onClick={()=>onSelect('agents')}>Open agent review →</button>
-      <p className="muted small">Proposals stay separate from verification. GitHub actions are previews only.</p></div>}
+import ResolutionSummary from './resolution-summary';
+import {overviewState} from './overview-state';
+import styles from './overview.module.css';
+const rank={CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3};
+export default function Overview({workspace:w,data:d,onSelect}: {workspace:ReviewWorkspace;data:WorkspaceData;previewCount?:number;onSelect:(id:SectionId)=>void}) {
+  if(!d.pr) return <div className={styles.empty}><p className={styles.eyebrow}>NEW REVIEW</p><h1>Review a pull request</h1><p>Load a GitHub pull request to inspect its changes, review issues, and verify proposed fixes.</p><span className="muted small">Start with the repository and PR number in the command bar above.</span></div>;
+  const {status,safeResults,actionable}=overviewState(w,d);
+  const top=[...actionable].sort((a,b)=>rank[a.severity]-rank[b.severity]).slice(0,5);
+  const metrics=[
+    [d.review?.reviewed_files.length,'files reviewed'],[d.context.length,'context files'],
+    [d.findings.length,'findings'],[d.counts.static,'static findings'],
+  ].filter(([value])=>typeof value==='number' && value>0);
+  return <div className={styles.overview}>
+    <header className={styles.header}><div><p className={styles.metadata}><span>{d.pr.repository}</span><span>#{d.pr.pull_request}</span></p><h1>{d.pr.title}</h1>
+      <div className={styles.metadata}>{d.pr.head_branch && d.pr.base_branch && <span>{d.pr.head_branch} → {d.pr.base_branch}</span>}<span>{d.pr.changed_files} changed files</span><span><b className={styles.additions}>+{d.pr.additions}</b> / <b className={styles.deletions}>−{d.pr.deletions}</b></span></div></div>
+      <span className={styles.status} data-tone={status==='VERIFYING'||status==='REVIEWING'?'running':status==='VERIFIED'||status==='REVIEW COMPLETE'?'complete':status==='LOADED'?'idle':'attention'} role="status">{status}</span>
+    </header>
+    <PipelineFlow workspace={w} data={d} onSelect={onSelect}/>
+    {d.hasReview && <><div className={styles.columns}><section className={styles.attention} aria-labelledby="attention-heading"><div className="section-heading"><h2 id="attention-heading">Needs attention</h2><span className="muted small">{actionable.length} findings</span></div>
+      {!d.findings.length?<p className="muted">No review findings returned.</p>:!top.length?<p className="muted">Existing findings have verified fix proposals. Nothing has been applied.</p>:top.map(f=><button type="button" className={styles.finding} key={f.id} onClick={()=>onSelect('findings')}>
+        <span className={`severity ${f.severity.toLowerCase()}`}>{f.severity}</span><strong>{f.title}</strong><code>{f.file}{f.line!=null?`:${f.line}`:''}</code><small>{f.source} · {f.status}</small>
+      </button>)}<button className="text-button" type="button" onClick={()=>onSelect('findings')}>View all findings →</button>
+    </section><section className={styles.context} aria-label="Supporting repository context">{d.context.length?<><RepoContextGraph files={d.pr.files.map(f=>f.filename)} context={d.context} loaded/><details><summary>{d.context.length} selected context files</summary><ul>{d.context.map(f=><li key={f.path}><code>{f.path}</code><p className="muted small">{f.reason}</p></li>)}</ul></details></>:<><h2>Repository context</h2><p className="muted">No repository context files were selected for this review.</p></>}
+      <button className="text-button" type="button" onClick={()=>onSelect('context')}>View repository context →</button></section></div>
+      {!!metrics.length && <div className={styles.metrics} aria-label="Analysis summary">{metrics.map(([value,label])=><span key={label}><strong>{value}</strong> {label}</span>)}</div>}</>}
+    <ResolutionSummary data={d} approved={safeResults.length} onSelect={onSelect}/>
   </div>;
 }
