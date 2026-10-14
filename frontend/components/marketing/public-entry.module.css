@@ -1,7 +1,27 @@
-/* Temporary route placeholder. Application styles remain in app/globals.css. */
-.entry { max-width: 960px; margin: 0 auto; padding: 24px; }
-.brand { display: flex; align-items: center; gap: 12px; font-weight: 600; }
-.content { padding-top: 32px; }
-.content h1 { font-size: 28px; line-height: 1.3; letter-spacing: normal; }
-.content p { margin: 12px 0 24px; color: var(--muted); }
-.openApp { display: inline-block; padding: 8px 16px; border: 1px solid var(--border); border-radius: var(--radius); }
+/* Temporary identity preview only; no landing sections or application overrides. */
+.entry { min-height: 100svh; color: var(--color-text); font-family: var(--font-ui); }
+.brand { display: flex; align-items: center; gap: var(--space-12); padding-block: var(--space-32); font-size: var(--type-body); font-weight: var(--weight-heading); }
+.brand svg { color: var(--color-indigo); }
+.preview { align-items: center; padding-block: var(--space-80) var(--space-96); }
+.copy { grid-column: 1 / span 6; min-width: 0; }
+.copy h1 { margin-top: var(--space-24); }
+.copy > p:last-of-type { max-width: 440px; margin: var(--space-24) 0 var(--space-32); }
+.actions { display: flex; flex-wrap: wrap; gap: var(--space-12); }
+.technical { grid-column: 8 / -1; min-width: 0; padding: var(--space-32); border: 1px solid var(--color-border-strong); border-radius: var(--radius-large); background: var(--color-dark-surface); background-image: radial-gradient(ellipse at 5% 0%, rgba(108, 99, 255, .14), transparent 64%), radial-gradient(ellipse at 95% 100%, rgba(56, 207, 248, .07), transparent 62%); box-shadow: var(--effect-ambient-shadow); }
+.codePreview { border: 0; border-radius: var(--radius-input); }
+.codePreview pre { padding: var(--space-24); }
+.keyword { color: #b3a7ff; }
+.string { color: #9ae3f4; }
+.caption { display: block; color: var(--color-muted); margin-top: var(--space-24); }
+@media (max-width: 1024px) {
+  .preview { gap: var(--space-48); padding-block: var(--space-48) var(--space-64); }
+  .copy, .technical { grid-column: 1 / -1; }
+  .technical { max-width: 640px; }
+}
+@media (max-width: 640px) {
+  .brand { padding-block: var(--space-24); }
+  .preview { padding-block: var(--space-32) var(--space-48); gap: var(--space-40); }
+  .technical { padding: var(--space-16); }
+  .caption { font-size: 12px; }
+  .codePreview pre { padding: var(--space-16); }
+}
