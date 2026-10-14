@@ -1,28 +1,31 @@
 'use client';
 import { useState } from 'react';
 import GeneratedTests, { type TestGeneration } from './generated-tests';
+import type {Analysis} from './workspace/types';
+import type {FixGeneration} from './proposed-fixes';
+import type {Finding} from './review-findings';
 import Verification, { type FixVerification } from './fix-verification';
 
-type Observation = {
-  finding_id: string; severity: string; title: string; file: string; line: number | null;
+export type Observation = {
+  finding_id: string; severity: Finding['severity']; category: Finding['category']; explanation: string; agent: string; source: string; title: string; file: string; line: number | null;
   status: string; confidence: number;
   evidence: { source: string; agent: string; title: string; explanation: string; rule_id: string | null }[];
 };
 export type AgentReview = {
   review_id: string;
-  pr: { repository: string; pull_request: number; head_sha: string; files: {filename: string; patch: string | null}[] };
+  pr: Analysis & { head_sha: string; head_repository: string };
   repository_context: {path: string; reason: string; used_for: string[]}[];
   agents: { agent: string; status: string; findings: Observation[]; notes: string[] }[];
   findings: Observation[];
   tests: TestGeneration;
-  fixes: { fixes: { finding_id: string; title: string; safe_to_verify: boolean; compatibility: { compatible: boolean; reason: string; behavior_ambiguous: boolean } }[] };
+  fixes: FixGeneration;
   verification: FixVerification;
   senior_review: { decision: string; summary: string; blocking_findings: string[]; non_blocking_findings: string[];
     verified_fixes: string[]; human_review_required: string[]; coverage_gaps: string[] };
   github_write_enabled: boolean;
 };
 const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-export default function AgentDashboard({ result }: { result: AgentReview }) {
+export default function AgentDashboard({ result, embeddedArtifacts = true, onPreview, savedPreview }: { result: AgentReview; embeddedArtifacts?: boolean; onPreview?: (reviewId: string, value: unknown) => void; savedPreview?: unknown }) {
   const [preview,setPreview]=useState<unknown>(null);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState('');
@@ -37,12 +40,14 @@ export default function AgentDashboard({ result }: { result: AgentReview }) {
       const value=await response.json();
       if (!response.ok) throw new Error(typeof value.detail==='string'?value.detail:'Preview failed.');
       setPreview(value);
+      onPreview?.(result.review_id, value);
     } catch (err) {setError(err instanceof Error?err.message:'Preview failed.');}
     finally {setLoading(false);}
   }
+  const visiblePreview = preview ?? savedPreview;
   function label(id: string) {return result.findings.find(f=>f.finding_id===id)?.title || result.fixes.fixes.find(f=>f.finding_id===id)?.title || id;}
   return <section className="ai-results" aria-labelledby="agents-title">
-    <div className="section-heading"><h2 id="agents-title">Agent Review</h2><span className="muted small">{result.pr.head_sha.slice(0,12)}</span></div>
+    <div className="section-heading"><h2 id="agents-title">Specialist roles</h2><span className="muted small">{result.pr.head_sha.slice(0,12)}</span></div>
     <div className="finding-list">{result.agents.map(agent=><article className="finding" key={agent.agent}>
       <div className="finding-meta"><span className="tag">{agent.agent.toUpperCase()} AGENT</span><span>{agent.status} · {agent.findings.length} observations</span></div>
       {agent.findings.map(f=><details className="context-skipped" key={f.finding_id}>
@@ -59,11 +64,13 @@ export default function AgentDashboard({ result }: { result: AgentReview }) {
       <summary>{title as string}: {(ids as string[]).length}</summary><ul>{(ids as string[]).map(id=><li key={id}>{label(id)}</li>)}</ul>
     </details>)}
     {result.senior_review.coverage_gaps.length>0 && <details className="context-skipped"><summary>Incomplete coverage</summary><ul>{result.senior_review.coverage_gaps.map((note,i)=><li key={i}>{note}</li>)}</ul></details>}
+    {embeddedArtifacts && <>
     <GeneratedTests result={result.tests} />
     <h2>Agent fix proposals</h2>
     {result.fixes.fixes.length===0 && <p className="muted small">No fix proposals were returned.</p>}
     {result.fixes.fixes.map(f=><p key={f.finding_id}>{f.title} · {f.compatibility.behavior_ambiguous?'AMBIGUOUS':f.compatibility.compatible?'COMPATIBLE':'INCOMPATIBLE'} · {f.compatibility.reason}</p>)}
     <Verification result={result.verification} />
+    </>}
     <h2>GitHub Actions</h2>
     <p className="tag">{result.github_write_enabled?'WRITE MODE ENABLED · PREVIEWS ONLY IN THIS UI':'READ-ONLY MODE'}</p>
     {!result.github_write_enabled && <p>GitHub writes are disabled.</p>}
@@ -72,6 +79,6 @@ export default function AgentDashboard({ result }: { result: AgentReview }) {
     {result.senior_review.verified_fixes.map(id=><div className="test-generation-action" key={id}><button type="button" disabled={loading} onClick={()=>showPreview('fix-pr',id)}>Preview verified fix PR · {label(id)}</button></div>)}
     {result.senior_review.verified_fixes.length===0 && <div className="test-generation-action"><button type="button" disabled={loading} onClick={()=>showPreview('fix-pr')}>Preview verified fix PR</button><p className="muted small">No eligible verified fix; this preview will explain why publication is unavailable.</p></div>}
     {error && <p className="error" role="alert">{error}</p>}
-    {preview!==null && <details className="changed-file generated-code" open><summary>Exact GitHub action preview · no writes</summary><pre className="diff"><code>{JSON.stringify(preview,null,2)}</code></pre></details>}
+    {visiblePreview!==null && visiblePreview!==undefined && <details className="changed-file generated-code" open><summary>Exact GitHub action preview · no writes</summary><pre className="diff"><code>{JSON.stringify(visiblePreview,null,2)}</code></pre></details>}
   </section>;
 }

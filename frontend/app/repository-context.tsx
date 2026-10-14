@@ -17,7 +17,7 @@ export default function RepositoryContext({
   return (
     <section className="repository-context" aria-labelledby="context-title">
       <div className="section-heading">
-        <h2 id="context-title">Repository context</h2>
+        <h2 id="context-title">Selected files</h2>
         <span className="muted small">{files.length} context files used</span>
       </div>
       <p className="muted small context">
@@ -27,7 +27,7 @@ export default function RepositoryContext({
         <ul className="context-list">
           {files.map((file) => (
             <li key={file.path}>
-              <code>{file.path}</code>
+              <code className="truncate" title={file.path}>{file.path}</code>
               <p>{file.reason}</p>
             </li>
           ))}
@@ -51,7 +51,7 @@ export default function RepositoryContext({
           <ul>
             {skippedFiles.map((file) => (
               <li key={file.path}>
-                <code>{file.path}</code> — {file.reason}
+                <code className="truncate" title={file.path}>{file.path}</code> — {file.reason}
               </li>
             ))}
           </ul>

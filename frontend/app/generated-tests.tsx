@@ -29,7 +29,7 @@ export default function GeneratedTests({ result }: { result: TestGeneration }) {
   return (
     <section className="ai-results" aria-labelledby="tests-title">
       <div className="section-heading">
-        <h2 id="tests-title">Generated tests</h2>
+        <h2 id="tests-title">Test proposals</h2>
         <span className="muted small">{result.total_tests} proposals</span>
       </div>
       <div className="combined-summary">
@@ -45,7 +45,7 @@ export default function GeneratedTests({ result }: { result: TestGeneration }) {
       </div>
       <p className="muted small">
         Generated from a refreshed AI review at commit {result.head_sha.slice(0, 12)}. Safe means
-        passed static checks; tests have not been run and still need human review.
+        passed static checks; execution evidence is shown separately in Verification.
       </p>
       {(result.contracts ?? []).filter(contract => contract.behavior_ambiguous).map(contract =>
         <ContractDetails key={contract.finding_id} contract={contract} />)}
@@ -61,7 +61,7 @@ export default function GeneratedTests({ result }: { result: TestGeneration }) {
             <h3>{test.test_name}</h3>
             <p>Related finding: {test.finding_title}</p>
             <p className="finding-location">
-              <code>{test.file}</code> · {test.finding_id}
+              <code className="truncate" title={test.file}>{test.file}</code> · {test.finding_id}
             </p>
             <ContractDetails contract={test.contract} />
             <div className="fix">

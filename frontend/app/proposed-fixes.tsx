@@ -49,7 +49,7 @@ export default function ProposedFixes({ result, onVerify, busy }: {
       </div>
       <p className="muted small">
         Refreshed review at commit {result.head_sha.slice(0, 12)}. Safe means static checks
-        passed, not proven correct or safe to execute. No fixes have been applied or run.
+        passed, not proven correct or safe to execute. No fixes are applied to repository files. Verification is a separate stage.
       </p>
       <div className="finding-list">
         {result.fixes.map((fix) => (
@@ -62,7 +62,7 @@ export default function ProposedFixes({ result, onVerify, busy }: {
             </div>
             <h3>{fix.title}</h3>
             <p>Related finding: {fix.finding_title}</p>
-            <p className="finding-location"><code>{fix.file}</code> · {fix.finding_id}</p>
+            <p className="finding-location"><code className="truncate" title={fix.file}>{fix.file}</code> · {fix.finding_id}</p>
             <p>{fix.explanation}</p>
             <ContractDetails contract={fix.contract} />
             <p className="muted small">Test/fix compatibility: {fix.compatibility.compatible ? 'YES' : 'NO'} · {fix.compatibility.reason}</p>

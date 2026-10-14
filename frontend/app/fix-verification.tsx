@@ -37,7 +37,7 @@ export type FixVerification = {
   }[];
 };
 function badge(status: Check['status']) {
-  return <span className={`severity ${status === 'PASSED' ? 'low' : status === 'FAILED' ? 'high' : 'medium'}`}>{status}</span>;
+  return <span className={`severity ${status === 'PASSED' ? 'verified' : status === 'FAILED' ? 'high' : 'medium'}`}>{status}</span>;
 }
 function TestResult({ label, check }: { label: string; check: Check }) {
   return <div className="fix">
@@ -66,7 +66,7 @@ function Scans({ name, before, after }: { name: string; before: Check; after: Ch
 }
 export default function Verification({ result }: { result: FixVerification }) {
   return <section className="ai-results" aria-labelledby="verification-title">
-    <div className="section-heading"><h2 id="verification-title">Fix verification</h2></div>
+    <div className="section-heading"><h2 id="verification-title">Verification results</h2></div>
     <div className="combined-summary">
       <span>Fixes verified: <strong>{result.fixes_verified}</strong></span>
       <span>Passed: <strong>{result.passed}</strong></span>
@@ -77,7 +77,7 @@ export default function Verification({ result }: { result: FixVerification }) {
     <div className="finding-list">{result.results.map((fix) => <article className="finding" key={fix.finding_id}>
       <div className="finding-meta">{badge(fix.status)}</div>
       <h3>{fix.title}</h3>
-      <p className="finding-location"><code>{fix.file}</code></p>
+      <p className="finding-location"><code className="truncate" title={fix.file}>{fix.file}</code></p>
       <p>Safe to apply: <strong>{fix.safe_to_apply ? 'YES' : 'NO'}</strong></p>
       <p>{fix.verification_summary}</p>
       <p className="muted small">Compatibility: {fix.compatibility.compatible ? 'YES' : 'NO'} · {fix.compatibility.reason}</p>

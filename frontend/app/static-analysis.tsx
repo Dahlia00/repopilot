@@ -48,7 +48,7 @@ export default function StaticAnalysis({
   return (
     <section className="ai-results" aria-labelledby="static-title">
       <div className="section-heading">
-        <h2 id="static-title">Static analysis</h2>
+        <h2 id="static-title">Scanner reports</h2>
         <span className="muted small">{findings.length} static findings</span>
       </div>
       <p className="muted small">
@@ -78,7 +78,7 @@ export default function StaticAnalysis({
               <code>{finding.rule_id}</code>
             </div>
             <p className="finding-location">
-              <code>{finding.file}</code>
+              <code className="truncate" title={finding.file}>{finding.file}</code>
               {finding.line !== null && <span> · Line {finding.line}</span>}
             </p>
             <h3>{finding.title}</h3>
