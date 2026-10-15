@@ -1,16 +1,12 @@
-import unittest
+import pytest
 
 from demo_discount import apply_discount
 
 
-class DiscountBehaviorTests(unittest.TestCase):
-    def test_twenty_percent_discount(self):
-        self.assertEqual(apply_discount(100, 20), 80)
-
-    def test_invalid_discount_is_rejected(self):
-        with self.assertRaises(ValueError):
-            apply_discount(100, 120)
+def test_twenty_percent_discount():
+    assert apply_discount(100, 20) == 80
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_invalid_discount_is_rejected():
+    with pytest.raises(ValueError):
+        apply_discount(100, 120)
