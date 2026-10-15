@@ -269,6 +269,29 @@ class ReviewEndpointTests(unittest.TestCase):
         self.assertEqual(self.client.post('/verify-fix',json=payload).status_code,422)
         self.assertEqual(self.ai_requests,[])
 
+    def test_direct_verification_preserves_selected_proposal_among_duplicate_ids(self):
+        from test_verification import fix, tests
+        from verification import VerificationResult
+        self.full_sources['sample.py'] = 'def choose(values):\n    return values[0]\n'
+        selected = fix()
+        other = fix(file='second.py', title='Different test-file fix', fixed_code='def choose(values):\n    return 80')
+        self.assertEqual(selected.finding_id, other.finding_id)
+        response_result = VerificationResult(finding_id=selected.finding_id,file=selected.file,
+            title=selected.title,proposal=selected)
+        async def verify(received, snapshot, artifacts):
+            self.assertEqual(received.model_dump(),selected.model_dump())
+            self.assertNotEqual(received.file,other.file)
+            self.assertEqual(artifacts.tests[0].model_dump(),tests().tests[0].model_dump())
+            return response_result
+        with patch('main.verify_one',new=AsyncMock(side_effect=verify)) as runner:
+            response=self.client.post('/verify-fix',json={'repository':'Dahlia00/repopilot',
+                'pull_request':1,'head_sha':'a'*40,'finding':FINDING,
+                'validated_fix':selected.model_dump(),'validated_test':tests().tests[0].model_dump()})
+        self.assertEqual(response.status_code,200,response.text)
+        runner.assert_awaited_once()
+        self.assertEqual(response.json()['proposal'],selected.model_dump(mode='json'))
+        self.assertEqual(response.json()['title'],selected.title)
+
     def test_direct_verification_without_test_is_not_approved(self):
         from test_verification import fix
         self.full_sources['sample.py'] = 'def choose(values):\n    return values[0]\n'

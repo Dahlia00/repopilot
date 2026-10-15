@@ -1,4 +1,5 @@
 import styles from './resolution.module.css';
+import {proposalIdentity} from './workspace/proposal-identity';
 import ContractDetails, { type BehavioralContract, type Compatibility } from './behavior-contract';
 import type { Finding } from './review-findings';
 import type { TestGeneration } from './generated-tests';
@@ -54,7 +55,7 @@ export default function ProposedFixes({ result, onVerify, busy }: {
       </p>
       <div className="finding-list">
         {result.fixes.map((fix) => (
-          <article className="finding" key={fix.finding_id}>
+          <article className="finding" key={proposalIdentity(fix)}>
             <p className={styles.label}>Related finding</p>
             <p className={styles.findingTitle}>{fix.finding_title}</p>
             <p className="finding-location"><code className="truncate" title={fix.file}>{fix.file}</code></p>

@@ -1,3 +1,4 @@
+import {verificationIdentity, proposalIdentity} from './proposal-identity';
 import type {ReviewWorkspace} from './use-review-workspace';
 import type {SectionId} from './types';
 import type {Finding} from '../review-findings';
@@ -10,7 +11,7 @@ export function workspaceData(w:ReviewWorkspace) {
   const fixes=sameHead(w.fixes) ?? sameHead(w.agents?.fixes);
   const baseVerification=sameHead(w.agents?.verification);
   const localVerification=sameHead(w.verification);
-  const verificationResults=[...new Map([...(baseVerification?.results ?? []),...(localVerification?.results ?? [])].map(r=>[r.finding_id,r])).values()];
+  const verificationResults=[...(localVerification?.results ?? []),...(baseVerification?.results ?? [])].filter((result,index,all)=>all.findIndex(candidate=>verificationIdentity(candidate)===verificationIdentity(result))===index);
   const verification=localVerification || baseVerification ? {
     ...(localVerification ?? baseVerification!), results:verificationResults,
     fixes_verified:verificationResults.filter(r=>r.status!=='SKIPPED').length,
@@ -23,7 +24,7 @@ export function workspaceData(w:ReviewWorkspace) {
   const findings:DisplayFinding[]=w.agents ? w.agents.findings.map(f=>({
     id:f.finding_id,findingId:f.finding_id,file:f.file,line:f.line,severity:f.severity,category:f.category,
     title:f.title,explanation:[f.explanation,...f.evidence.map(e=>`${e.source} / ${e.agent}: ${e.explanation}`)].join('\n\n'),
-    suggested_fix:fixes?.fixes.find(p=>p.finding_id===f.finding_id)?.fixed_code ?? '',confidence:f.confidence,confidenceKnown:true,
+    suggested_fix:fixes?.fixes.find(p=>p.file===f.file && p.finding_id===f.finding_id)?.fixed_code ?? '',confidence:f.confidence,confidenceKnown:true,
     source:[...new Set(f.evidence.map(e=>e.source==='AI'?`${e.agent} agent`:e.source))].join(' + ') || f.source,
     status:f.status==='AMBIGUOUS'?'Ambiguous':f.status==='CONFIRMED'?'Pending':'Needs attention',
   })) : [
@@ -32,8 +33,8 @@ export function workspaceData(w:ReviewWorkspace) {
       ruleId:f.rule_id,suggested_fix:'',confidence:null,confidenceKnown:false,status:'Needs attention'})),
   ];
   for(const f of findings) {
-    const fix=fixes?.fixes.find(p=>p.finding_id===f.findingId || (p.finding?.file===f.file && p.finding.line===f.line && p.finding.title===f.title));
-    const result=verification?.results.find(v=>v.finding_id===(fix?.finding_id ?? f.findingId));
+    const fix=fixes?.fixes.find(p=>p.file===f.file && (p.finding_id===f.findingId || (p.finding?.file===f.file && p.finding.line===f.line && p.finding.title===f.title)));
+    const result=verification?.results.find(v=>v.file===f.file && (fix ? !!v.proposal && proposalIdentity(v.proposal)===proposalIdentity(fix) : v.finding_id===f.findingId));
     const matchingProposal=!fix || (result?.proposal?.fixed_code===fix.fixed_code && result?.proposal?.unified_diff===fix.unified_diff);
     if(result && matchingProposal) f.status=result.status==='PASSED' && result.safe_to_apply && result.proposal ? 'Verified' : result.compatibility.behavior_ambiguous ? 'Ambiguous' : 'Needs attention';
     else if(fix?.compatibility.behavior_ambiguous) f.status='Ambiguous';

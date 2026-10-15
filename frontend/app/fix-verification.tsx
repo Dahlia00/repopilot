@@ -1,4 +1,6 @@
 import styles from './resolution.module.css';
+import type {FixArtifact} from './proposed-fixes';
+import {verificationIdentity} from './workspace/proposal-identity';
 import type { Compatibility } from './behavior-contract';
 type Check = {
   status: 'PASSED' | 'FAILED' | 'SKIPPED';
@@ -24,7 +26,7 @@ export type FixVerification = {
     finding_id: string;
     file: string;
     title: string;
-    proposal: { fixed_code: string; unified_diff: string } | null;
+    proposal: FixArtifact | null;
     status: Check['status'];
     syntax_check: Check;
     generated_test: Check;
@@ -82,7 +84,7 @@ export default function Verification({ result }: { result: FixVerification }) {
     <p className="muted small">Artifact snapshot: <code>{result.head_sha.slice(0,12)}</code>. Verification covers each exact proposal independently in temporary isolation. Nothing is automatically applied. GitHub remains read-only by default.</p>
     <div className="finding-list">{result.results.map((fix) => {
       const approved=fix.status==='PASSED' && fix.safe_to_apply && fix.compatibility.compatible && !fix.compatibility.behavior_ambiguous;
-      return <article className="finding" key={fix.finding_id}>
+      return <article className="finding" key={verificationIdentity(fix)}>
         <div className={styles.decision} data-approved={approved}>
           <span className={styles.badge} data-tone={approved?'passed':'attention'}>{approved?'VERIFICATION APPROVED':'HUMAN REVIEW REQUIRED'}</span>
           <h3>{fix.title}</h3>

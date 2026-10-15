@@ -1,3 +1,4 @@
+import {proposalIdentity} from './proposal-identity';
 import type {ReviewWorkspace} from './use-review-workspace';
 import type {WorkspaceData} from './data';
 import type {SectionId} from './types';
@@ -11,7 +12,7 @@ export function overviewState(w:ReviewWorkspace,d:WorkspaceData) {
   const results=d.verification?.results ?? [];
   // Approval applies only to the exact proposal currently displayed, never a replaced artifact.
   const safeResults=results.filter(r=>r.status==='PASSED' && r.safe_to_apply && r.proposal && !r.compatibility.behavior_ambiguous && r.compatibility.compatible &&
-    !d.fixes?.fixes.some(f=>f.finding_id===r.finding_id && (f.fixed_code!==r.proposal?.fixed_code || f.unified_diff!==r.proposal?.unified_diff)));
+    (!d.fixes || d.fixes.fixes.some(f=>r.proposal && proposalIdentity(f)===proposalIdentity(r.proposal))));
   const allVerified=results.length>0 && safeResults.length===results.length;
   const verificationAttention=(!!d.verification && !allVerified) || !!roleFailed('verification');
   const fixAttention=!!w.fixError || !!roleFailed('fix') || !!d.fixes?.rejected_fixes || !!d.fixes?.fixes.some(f=>!f.safe_to_verify || !f.compatibility.compatible || f.compatibility.behavior_ambiguous);
