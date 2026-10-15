@@ -47,6 +47,7 @@ export default function useReviewWorkspace() {
 
   async function analyze(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy) return;
     clearResults();
     const number = Number(pullRequest);
     if (
@@ -78,7 +79,9 @@ export default function useReviewWorkspace() {
               : `GitHub lookup failed (HTTP ${response.status}). Please try again.`,
         );
       }
-      setAnalysis((await response.json()) as Analysis);
+      const result = (await response.json()) as Analysis;
+      setAnalysis(result);
+      return result;
     } catch (err) {
       setError(
         err instanceof TypeError
@@ -93,8 +96,7 @@ export default function useReviewWorkspace() {
       setLoading(false);
     }
   }
-  async function analyzeWithAI() {
-    if (!analysis || busy) return;
+  async function reviewAnalysis(pr: Analysis) {
     setReview(null);
     setReviewError('');
     setAgents(null);
@@ -111,8 +113,8 @@ export default function useReviewWorkspace() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          repository: analysis.repository,
-          pull_request: analysis.pull_request,
+          repository: pr.repository,
+          pull_request: pr.pull_request,
         }),
         signal: AbortSignal.timeout(480000),
       });
@@ -140,6 +142,18 @@ export default function useReviewWorkspace() {
     } finally {
       setReviewing(false);
     }
+  }
+
+  async function analyzeWithAI() {
+    if (!analysis || busy) return;
+    await reviewAnalysis(analysis);
+  }
+
+  async function runFullReview(event: FormEvent<HTMLFormElement>) {
+    // Use the returned PR directly; React may not have committed setAnalysis yet.
+    const pr = await analyze(event);
+    if (!pr) return;
+    await reviewAnalysis(pr);
   }
 
   async function generateTestProposals() {
@@ -265,7 +279,7 @@ export default function useReviewWorkspace() {
   return { repository, pullRequest, analysis, review, generated, fixes, verification, agents,
     loading, reviewing, generating, fixing, verifying, agentLoading, busy,
     error, reviewError, generationError, fixError, verificationError, agentError,
-    setRepository, setPullRequest, clearResults, analyze, analyzeWithAI,
+    setRepository, setPullRequest, clearResults, analyze, analyzeWithAI, runFullReview,
     generateTestProposals, generateFixProposals, verifyFixProposal, runAgentReview };
 }
 export type ReviewWorkspace = ReturnType<typeof useReviewWorkspace>;

@@ -12,12 +12,11 @@ export default function RepoPilotApp() {
   const data=workspaceData(workspace);
   const previewCount=preview?.reviewId===workspace.agents?.review_id?preview?.count:undefined;
   return <AppShell workspace={data.pr?`${data.pr.repository} #${data.pr.pull_request}`:undefined} active={section} onSelect={setSection} counts={data.counts}
-    command={<CommandBar repository={workspace.repository} pullRequest={workspace.pullRequest} busy={workspace.busy} loaded={!!workspace.analysis}
+    command={<CommandBar repository={workspace.repository} pullRequest={workspace.pullRequest} busy={workspace.busy} reviewed={data.hasReview}
       loading={workspace.loading} reviewing={workspace.reviewing}
       onRepository={value=>{workspace.setRepository(value);workspace.clearResults();}}
       onPullRequest={value=>{workspace.setPullRequest(value);workspace.clearResults();}}
-      onLoad={event=>{setSection('overview');void workspace.analyze(event);}}
-      onReview={()=>{setSection('overview');void workspace.analyzeWithAI();}}/>}>
+      onReview={event=>{setSection('overview');void workspace.runFullReview(event);}}/>}>
     <WorkspaceContent section={section} workspace={workspace} data={data} previewCount={previewCount} onSelect={setSection}
       savedPreview={preview?.reviewId===workspace.agents?.review_id?preview?.value:undefined}
       onPreview={(reviewId,value)=>setPreview(previous=>({reviewId,value,count:previous?.reviewId===reviewId?previous.count+1:1}))}/>

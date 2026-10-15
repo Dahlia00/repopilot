@@ -47,9 +47,9 @@ export function Sidebar({active, onSelect, counts}: {active: SectionId; onSelect
     </div>)}
   </nav><p className="sidebar-note">Review evidence.<br/>Keep changes under your control.</p></aside>;
 }
-export function CommandBar(p: {repository:string; pullRequest:string; busy:boolean; loaded:boolean; loading:boolean; reviewing:boolean;
-  onRepository:(value:string)=>void; onPullRequest:(value:string)=>void; onLoad:(event:FormEvent<HTMLFormElement>)=>void; onReview:()=>void}) {
-  return <form className="command-bar" onSubmit={p.onLoad} aria-label="Pull request commands">
+export function CommandBar(p: {repository:string; pullRequest:string; busy:boolean; reviewed:boolean; loading:boolean; reviewing:boolean;
+  onRepository:(value:string)=>void; onPullRequest:(value:string)=>void; onReview:(event:FormEvent<HTMLFormElement>)=>void}) {
+  return <form className="command-bar" onSubmit={p.onReview} aria-label="Pull request commands">
     <div className="command-field repository-command"><label htmlFor="repository" className="sr-only">Repository</label>
       <input id="repository" value={p.repository} placeholder="owner/repository" required autoComplete="off" spellCheck={false}
         maxLength={200} disabled={p.busy} onChange={e=>p.onRepository(e.target.value)}/></div>
@@ -57,8 +57,7 @@ export function CommandBar(p: {repository:string; pullRequest:string; busy:boole
       <input id="pr" type="number" min="1" step="1" placeholder="PR #" value={p.pullRequest} required disabled={p.busy}
         onChange={e=>p.onPullRequest(e.target.value)}/></div>
     <div className="command-actions">
-      <button className="secondary-button" type="submit" disabled={p.busy}>{p.loading?'Loading…':'Load PR'}</button>
-      <button type="button" disabled={!p.loaded || p.busy} onClick={p.onReview}>{p.reviewing?'Reviewing…':'Run review'}<span aria-hidden="true">↗</span></button>
+      <button type="submit" disabled={p.busy}>{p.loading?'Loading PR…':p.reviewing?'Reviewing…':p.reviewed?'Run review again':'Run review'}<span aria-hidden="true">↗</span></button>
     </div>
   </form>;
 }
