@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from context import RepositoryContext
 from review import Finding, ReviewResponse, MODEL
-from contracts import BehavioralContract, normalize_contract, test_cases, Unknown
+from contracts import BehavioralContract, normalize_contract, contract_from_existing_tests, test_cases, Unknown
 
 MAX_PROPOSALS = 5
 MAX_CODE_CHARS = 6000
@@ -287,6 +287,8 @@ async def generate_tests(review: ReviewResponse, repository: RepositoryContext,
         except (ValueError, ValidationError) as exc:
             raise HTTPException(502, 'OpenAI returned malformed or incomplete test proposal JSON.') from exc
         contract = normalize_contract(result.contract, evidence_sources, finding.finding_id, finding.file, function)
+        if contract.behavior_ambiguous:
+            contract = contract_from_existing_tests(evidence_sources, finding.finding_id, finding.file, function) or contract
         contracts.append(contract)
         if contract.behavior_ambiguous:
             skipped.append(SkippedFinding(finding_id=finding.finding_id, file=finding.file, title=finding.title,

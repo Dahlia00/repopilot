@@ -109,7 +109,7 @@ class ValidationTests(unittest.TestCase):
 
 
 class GenerationTests(unittest.IsolatedAsyncioTestCase):
-    async def generate(self, transform=None, category='Bug'):
+    async def generate(self, transform=None, category='Bug', repository_data=None):
         self.requests = []
         def transport(request):
             body = json.loads(request.content)
@@ -129,7 +129,7 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
                 'text': json.dumps(data),'annotations':[]}]}]})
         async with AsyncOpenAI(api_key='test-only-placeholder', max_retries=0,
             http_client=httpx.AsyncClient(transport=httpx.MockTransport(transport))) as client:
-            return await generate_tests(review(category), repository(), client)
+            return await generate_tests(review(category), repository_data or repository(), client)
 
     async def test_structured_generation_validates_and_preserves_proposal(self):
         result = await self.generate()
@@ -139,6 +139,29 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.requests[0]['store'])
         self.assertTrue(self.requests[0]['text']['format']['strict'])
         self.assertEqual(json.loads(self.requests[0]['input'])['full_content'], SOURCE)
+
+    async def test_ambiguous_model_contract_uses_existing_test_fallback(self):
+        repo=repository()
+        repo.changed_files.append(FullChangedFile(path='test_sample.py',status='added',patch='@@ -0,0 +1 @@\n+test',content=VALID))
+        def transform(data):
+            data['contract']['desired_behavior']='A paraphrase without exact evidence.'
+            data['contract']['behavior_ambiguous']=True
+            return data
+        result=await self.generate(transform,repository_data=repo)
+        self.assertEqual((result.total_tests,result.safe_tests,result.rejected_tests),(1,1,0))
+        self.assertFalse(result.contracts[0].behavior_ambiguous)
+        self.assertEqual(result.contracts[0].contract_source,'existing_tests')
+        self.assertEqual(result.contracts[0].evidence_path,'test_sample.py')
+        self.assertEqual(result.tests[0].contract,result.contracts[0])
+        self.assertEqual(result.tests[0].test_code,VALID)
+
+    async def test_grounded_model_contract_takes_precedence_over_test_fallback(self):
+        repo=repository()
+        repo.context_files.append(ContextFile(path='test_sample.py',reason='Existing test',content=VALID))
+        with patch('test_generation.contract_from_existing_tests',side_effect=AssertionError('Grounded contract must win')):
+            result=await self.generate(repository_data=repo)
+        self.assertEqual(result.contracts[0].contract_source,'repository_context')
+        self.assertEqual(result.safe_tests,1)
 
     async def test_grounded_model_ambiguous_contract_still_generates_proposal(self):
         def transform(data):

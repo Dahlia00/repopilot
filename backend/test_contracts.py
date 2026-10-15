@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import AsyncMock, patch
-from contracts import BehavioralContract, BehaviorCase, compatibility, contract_is_grounded, normalize_contract, static_outcome
+from contracts import BehavioralContract, BehaviorCase, compatibility, contract_is_grounded, contract_from_existing_tests, normalize_contract, static_outcome
 from test_test_generation import contract, QUOTE, repository
 from test_verification import fix, tests
 from verification import verify_one
@@ -110,6 +110,59 @@ class ContractTests(unittest.TestCase):
         result=compatibility(proposed,test,{'README.md':c.evidence_quote})
         self.assertFalse(result.compatible)
         self.assertIn('already pass',result.reason)
+
+
+class ExistingTestFallbackTests(unittest.TestCase):
+    equality = 'from pricing import apply_discount\ndef test_discount():\n    assert apply_discount(100, 20) == 80\n'
+    raises = 'import pytest\nfrom pricing import apply_discount\ndef test_invalid():\n    with pytest.raises(ValueError):\n        apply_discount(100, 120)\n'
+
+    def derive(self, code, **extra):
+        return contract_from_existing_tests({'test_pricing.py':code, **extra},'finding','pricing.py','apply_discount')
+
+    def test_literal_return_case_is_grounded(self):
+        result=self.derive(self.equality)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.contract_source,'existing_tests')
+        self.assertEqual(result.evidence_path,'test_pricing.py')
+        self.assertEqual(result.desired_behavior_confidence,100)
+        self.assertFalse(result.behavior_ambiguous)
+        self.assertEqual(result.cases,[BehaviorCase(arguments=[100,20],outcome='returns',value=80)])
+        self.assertEqual(result.evidence_quote,result.desired_behavior)
+        self.assertIn(result.evidence_quote,self.equality)
+        self.assertTrue(contract_is_grounded(result,{'test_pricing.py':self.equality}))
+
+    def test_raises_and_combined_cases_are_preserved(self):
+        result=self.derive(self.raises)
+        self.assertEqual(result.cases,[BehaviorCase(arguments=[100,120],outcome='raises',exception='ValueError')])
+        # Keep the exact two test functions in deterministic source order.
+        combined='import pytest\n'+self.equality+'def test_invalid():'+self.raises.split('def test_invalid():')[1]
+        result=self.derive(combined)
+        self.assertEqual([case.outcome for case in result.cases],['returns','raises'])
+        self.assertEqual(result.cases[0].value,80)
+        self.assertEqual(result.cases[1].exception,'ValueError')
+
+    def test_unsupported_malformed_unrelated_and_side_effects_are_ignored(self):
+        snippets=[
+            'import unittest\nclass Tests(unittest.TestCase):\n    def test_discount(self):\n        self.assertEqual(apply_discount(100,20),80)',
+            'def broken(', self.equality.replace('apply_discount','other'),
+            self.equality.replace('assert apply_discount(100, 20) == 80','for x in [100]:\n        assert apply_discount(x, 20) == 80'),
+            'import os\n'+self.equality, 'print("side effect")\n'+self.equality,
+            self.equality.replace('def test_discount():','@decorator\ndef test_discount():'),
+            self.equality.replace('def test_discount():','def test_discount(fixture):'),
+            self.equality.replace('from pricing','from unrelated'),
+            self.equality.replace('== 80','== 80, open("file")'),
+            self.equality.replace('def test_discount():','def test_discount() -> dangerous():')]
+        for code in snippets:
+            with self.subTest(code=code):
+                self.assertIsNone(self.derive(code))
+
+    def test_no_tests_or_implementation_alone_cannot_ground(self):
+        self.assertIsNone(contract_from_existing_tests({},'finding','pricing.py','apply_discount'))
+        self.assertIsNone(contract_from_existing_tests({'pricing.py':self.equality},'finding','pricing.py','apply_discount'))
+
+    def test_invalid_candidate_does_not_prevent_later_valid_test(self):
+        result=self.derive(self.equality,**{'a_broken.py':'def broken('})
+        self.assertFalse(result.behavior_ambiguous)
 
 
 class PairTests(unittest.IsolatedAsyncioTestCase):
