@@ -499,10 +499,57 @@ class ReviewEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()['findings'][0]['line'])
 
+    def test_cross_file_finding_is_ignored_without_losing_current_file_finding(self):
+        def handler(request):
+            filename = json.loads(json.loads(request.content)['input'])['file']
+            if filename == 'sample.py':
+                return model_response([FINDING, {**FINDING, 'file': 'README.md', 'line': 99}])
+            return model_response([])
+        self.ai_handler = handler
+        response = self.review()
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body['findings'], [FINDING])
+        self.assertEqual(body['reviewed_files'], ['sample.py', 'second.py'])
+        self.assertEqual(body['context_warnings'], [
+            'sample.py: ignored a model finding referring to another file'])
+        self.assertEqual(body['repository_context'][0]['used_for'], ['sample.py', 'second.py'])
+        self.assertEqual(len(self.ai_requests), 2)
+
+    def test_only_cross_file_findings_still_count_as_reviewed(self):
+        self.ai_handler = lambda request: model_response([{**FINDING, 'file': 'README.md'}])
+        response = self.review()
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body['findings'], [])
+        self.assertEqual(body['reviewed_files'], ['sample.py', 'second.py'])
+        self.assertEqual(body['skipped_files'], ['image.png'])
+        self.assertEqual(body['context_warnings'], [
+            'sample.py: ignored a model finding referring to another file',
+            'second.py: ignored a model finding referring to another file'])
+        self.assertEqual(body['repository_context'][0]['used_for'], ['sample.py', 'second.py'])
+
+    def test_cross_file_finding_is_not_reassigned_to_its_own_review(self):
+        self.ai_handler = lambda request: model_response(
+            [{**FINDING, 'file': 'second.py', 'line': 1}]
+            if json.loads(json.loads(request.content)['input'])['file'] == 'sample.py' else [])
+        response = self.review()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['findings'], [])
+        self.assertEqual(response.json()['reviewed_files'], ['sample.py', 'second.py'])
+        self.assertEqual(len(self.ai_requests), 2)
+
+    def test_cross_file_filter_does_not_bypass_structured_validation(self):
+        self.ai_handler = lambda request: model_response([
+            {**FINDING, 'file': 'README.md', 'confidence': 101}])
+        response = self.review()
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertNotIn('findings', response.json())
+
     def test_invalid_findings_are_not_returned(self):
         for change in [{'confidence': 101}, {'confidence': -1}, {'severity': 'UNKNOWN'},
                        {'category': 'Unknown'}, {'line': 99}, {'line': 0},
-                       {'file': 'invented.py'}, {'confidence': True}, {'line': '2'}, {'title': ''}]:
+                       {'confidence': True}, {'line': '2'}, {'title': ''}]:
             with self.subTest(change=change):
                 self.ai_handler = lambda request: model_response([{**FINDING, **change}])
                 response = self.review()

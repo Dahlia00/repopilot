@@ -1,0 +1,21 @@
+.label { font-size:11px; color:var(--muted); margin:16px 0 4px; }
+p.findingTitle { font-size:15px; color:var(--text); font-weight:500; margin:4px 0; }
+.badge { display:inline-block; width:fit-content; max-width:100%; font-size:10px; font-weight:600; letter-spacing:.025em; line-height:1.5; padding:4px 8px; border-radius:4px; color:var(--muted); background:#919dab12; }
+.badge[data-tone='passed'] { color:var(--success); background:#87cbb012; }
+.badge[data-tone='attention'] { color:var(--warning); background:#d6b67812; }
+.badge[data-tone='ready'] { color:var(--accent); background:#a5aeff12; }
+.badge[data-tone='skipped'] { color:var(--neutral); background:#919dab12; }
+.eligibility { border-top:1px solid var(--border); margin-top:20px; padding-top:20px; }
+.eligibility button { margin-top:4px; }
+.decision { border-left:2px solid var(--warning); padding-left:20px; }
+.decision[data-approved='true'] { border-color:var(--success); }
+p.decisionText { font-size:12px; color:var(--text); margin-bottom:4px; }
+p.reason { color:var(--warning); font-size:12px; }
+.checks { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:20px 24px; border-block:1px solid var(--border); margin-top:24px; padding:20px 0; }
+.check { display:flex; flex-direction:column; align-items:flex-start; gap:8px; min-width:0; }
+.check > strong { font-size:12px; font-weight:500; }
+.check small { font-size:11px; line-height:1.6; }
+.scanStates { display:flex; align-items:center; flex-wrap:wrap; gap:6px; font-size:10px; color:var(--muted); }
+@media(min-width:1400px) { .checks { grid-template-columns:repeat(3,minmax(0,1fr)) repeat(2,minmax(0,1.6fr)); } }
+@media(max-width:650px) { .checks { grid-template-columns:repeat(2,minmax(0,1fr)); } .decision { padding-left:14px; } }
+@media(max-width:400px) { .checks { grid-template-columns:minmax(0,1fr); } }

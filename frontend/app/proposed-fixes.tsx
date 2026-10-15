@@ -1,3 +1,4 @@
+import styles from './resolution.module.css';
 import ContractDetails, { type BehavioralContract, type Compatibility } from './behavior-contract';
 import type { Finding } from './review-findings';
 import type { TestGeneration } from './generated-tests';
@@ -44,35 +45,46 @@ export default function ProposedFixes({ result, onVerify, busy }: {
       </div>
       <div className="combined-summary">
         <span>Fixes generated: <strong>{result.total_fixes}</strong></span>
-        <span>Safe fixes: <strong>{result.safe_fixes}</strong></span>
-        <span>Rejected fixes: <strong>{result.rejected_fixes}</strong></span>
+        <span>Eligible for verification: <strong>{result.safe_fixes}</strong></span>
+        <span>Rejected proposals: <strong>{result.rejected_fixes}</strong></span>
       </div>
       <p className="muted small">
-        Refreshed review at commit {result.head_sha.slice(0, 12)}. Safe means static checks
-        passed, not proven correct or safe to execute. No fixes are applied to repository files. Verification is a separate stage.
+        Proposals at commit <code>{result.head_sha.slice(0, 12)}</code>. Eligibility means proposal validation passed;
+        deterministic verification is still required. Nothing is automatically applied. GitHub remains read-only by default.
       </p>
       <div className="finding-list">
         {result.fixes.map((fix) => (
           <article className="finding" key={fix.finding_id}>
-            <div className="finding-meta">
-              <span className={`severity ${fix.safe_to_verify ? 'low' : 'high'}`}>
-                {fix.safe_to_verify ? 'SAFE · CHECKS PASSED' : 'NOT SAFE · REJECTED'}
-              </span>
-              <span>{fix.confidence}% confidence · {fix.sources.join(' + ')}</span>
-            </div>
+            <p className={styles.label}>Related finding</p>
+            <p className={styles.findingTitle}>{fix.finding_title}</p>
+            <p className="finding-location"><code className="truncate" title={fix.file}>{fix.file}</code></p>
+            <p className={styles.label}>Proposed change</p>
             <h3>{fix.title}</h3>
-            <p>Related finding: {fix.finding_title}</p>
-            <p className="finding-location"><code className="truncate" title={fix.file}>{fix.file}</code> · {fix.finding_id}</p>
             <p>{fix.explanation}</p>
-            <ContractDetails contract={fix.contract} />
-            <p className="muted small">Test/fix compatibility: {fix.compatibility.compatible ? 'YES' : 'NO'} · {fix.compatibility.reason}</p>
-            <button type="button" disabled={busy || !fix.safe_to_verify || !fix.finding} onClick={() => onVerify(fix)}>
-              Verify this fix
-            </button>
-            <p className="muted small">Verifies this existing proposal with saved test artifacts. No OpenAI regeneration.</p>
-            {fix.validation_errors.length > 0 && <ul className="error">
-              {fix.validation_errors.map((error, index) => <li key={index}>{error}</li>)}
-            </ul>}
+            <div className="finding-meta"><span>{fix.confidence}% confidence · {fix.sources.join(' + ')}</span></div>
+            <div className={styles.eligibility}>
+              <span className={styles.badge} data-tone={fix.safe_to_verify ? 'ready' : 'attention'}>
+                {fix.safe_to_verify ? 'READY FOR VERIFICATION' : 'NOT ELIGIBLE FOR VERIFICATION'}
+              </span>
+              <p className="muted small">{!fix.compatibility.compatible || fix.compatibility.behavior_ambiguous
+                ? fix.compatibility.reason : fix.safe_to_verify
+                  ? 'Proposal validation passed. Verify this exact change before considering it for application.'
+                  : fix.validation_errors[0] || 'This proposal did not pass validation.'}</p>
+              {!fix.finding && <p className="muted small">Verification is unavailable because the related finding artifact is missing.</p>}
+              <button type="button" disabled={busy || !fix.safe_to_verify || !fix.finding} onClick={() => onVerify(fix)}>
+                Verify this fix
+              </button>
+              <p className="muted small">Uses this proposal and saved test artifacts in temporary isolation. No AI regeneration.</p>
+            </div>
+            <details className="changed-file generated-code">
+              <summary>Compatibility and validation details</summary>
+              <p className="muted small">Finding ID: <code>{fix.finding_id}</code></p>
+              <p>Test/fix compatibility: {fix.compatibility.compatible ? 'Compatible' : 'Incompatible'} · {fix.compatibility.reason}</p>
+              <ContractDetails contract={fix.contract} />
+              {fix.validation_errors.length > 0 && <ul className="error">
+                {fix.validation_errors.map((error, index) => <li key={index}>{error}</li>)}
+              </ul>}
+            </details>
             <details className="changed-file generated-code">
               <summary>Before / after</summary>
               <p className="muted small">Original code</p>
