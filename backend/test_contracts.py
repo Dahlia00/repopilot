@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import AsyncMock, patch
-from contracts import BehavioralContract, BehaviorCase, compatibility, normalize_contract, static_outcome
+from contracts import BehavioralContract, BehaviorCase, compatibility, contract_is_grounded, normalize_contract, static_outcome
 from test_test_generation import contract, QUOTE, repository
 from test_verification import fix, tests
 from verification import verify_one
@@ -39,6 +39,61 @@ class ContractTests(unittest.TestCase):
         candidate=contract().model_copy(update={'evidence_path':'sample.py','evidence_quote':code,'desired_behavior':code})
         normalized=normalize_contract(candidate,{'sample.py':code},candidate.finding_id,'sample.py','choose')
         self.assertTrue(normalized.behavior_ambiguous)
+
+    def test_server_clears_model_ambiguity_for_exact_function_docstring(self):
+        candidate=contract().model_copy(update={'behavior_ambiguous':True, 'evidence_path':'sample.py'})
+        source='def choose(values):\n    """'+QUOTE+'"""\n    return values[0]\n'
+        self.assertTrue(contract_is_grounded(candidate,{'sample.py':source}))
+        normalized=normalize_contract(candidate,{'sample.py':source},candidate.finding_id,'sample.py','choose')
+        self.assertFalse(normalized.behavior_ambiguous)
+        self.assertEqual(normalized.cases,candidate.cases)
+        self.assertEqual(normalized.evidence_quote,QUOTE)
+        self.assertTrue(candidate.behavior_ambiguous)  # Do not mutate the supplied model artifact.
+
+    def test_model_ambiguity_does_not_bypass_evidence_requirements(self):
+        candidate=contract().model_copy(update={'behavior_ambiguous':True, 'evidence_path':'sample.py'})
+        sources=[
+            'def choose(values):\n    """No boundary contract here."""\n    return values[0]\n',
+            'def choose(values):\n    # '+QUOTE+'\n    return values[0]\n',
+            'SPEC = "'+QUOTE+'"\ndef choose(values):\n    return values[0]\n',
+        ]
+        for source in sources:
+            with self.subTest(source=source):
+                self.assertFalse(contract_is_grounded(candidate,{'sample.py':source}))
+                self.assertTrue(normalize_contract(candidate,{'sample.py':source},candidate.finding_id,'sample.py','choose').behavior_ambiguous)
+
+    def test_existing_tests_grounding_ignores_model_flag_but_requires_matching_cases(self):
+        source='import pytest\nfrom sample import choose\ndef test_boundary():\n    with pytest.raises(ValueError):\n        choose([])\n'
+        candidate=contract().model_copy(update={'behavior_ambiguous':True,
+            'contract_source':'existing_tests','evidence_path':'test_sample.py',
+            'evidence_quote':source,'desired_behavior':source})
+        evidence={'test_sample.py':source}
+        self.assertTrue(contract_is_grounded(candidate,evidence))
+        self.assertFalse(normalize_contract(candidate,evidence,candidate.finding_id,'sample.py','choose').behavior_ambiguous)
+        wrong=candidate.model_copy(update={'cases':[BehaviorCase(arguments=[[]],outcome='raises',exception='IndexError')]})
+        self.assertFalse(contract_is_grounded(wrong,evidence))
+        self.assertTrue(normalize_contract(wrong,evidence,wrong.finding_id,'sample.py','choose').behavior_ambiguous)
+
+    def test_server_keeps_all_grounding_and_identity_guards(self):
+        for flag in [True,False]:
+            for update in [
+                {'desired_behavior_confidence':89}, {'contract_source':'inferred'},
+                {'contract_source':'finding'}, {'cases':[]}, {'desired_behavior':None},
+                {'desired_behavior':'Different specification'}, {'evidence_path':'missing.md'},
+                {'evidence_quote':'Missing quote'}, {'finding_id':'other'},
+                {'file':'other.py'}, {'function':'other'},
+            ]:
+                with self.subTest(flag=flag,update=update):
+                    candidate=contract().model_copy(update={'behavior_ambiguous':flag,**update})
+                    normalized=normalize_contract(candidate,{'README.md':QUOTE},contract().finding_id,'sample.py','choose')
+                    self.assertTrue(normalized.behavior_ambiguous)
+                    self.assertEqual((normalized.finding_id,normalized.file,normalized.function),(contract().finding_id,'sample.py','choose'))
+
+    def test_text_spec_formats_remain_grounded_with_model_ambiguity(self):
+        for path in ['README.md','behavior.txt','behavior.rst']:
+            with self.subTest(path=path):
+                candidate=contract().model_copy(update={'behavior_ambiguous':True,'evidence_path':path})
+                self.assertFalse(normalize_contract(candidate,{path:QUOTE},candidate.finding_id,'sample.py','choose').behavior_ambiguous)
 
     def test_contracts_must_be_identical(self):
         test=tests().tests[0]

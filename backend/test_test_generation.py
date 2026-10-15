@@ -140,6 +140,17 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.requests[0]['text']['format']['strict'])
         self.assertEqual(json.loads(self.requests[0]['input'])['full_content'], SOURCE)
 
+    async def test_grounded_model_ambiguous_contract_still_generates_proposal(self):
+        def transform(data):
+            data['contract']['behavior_ambiguous']=True
+            return data
+        result=await self.generate(transform)
+        self.assertEqual((result.total_tests,result.safe_tests,result.rejected_tests),(1,1,0))
+        self.assertFalse(result.contracts[0].behavior_ambiguous)
+        self.assertFalse(result.tests[0].contract.behavior_ambiguous)
+        self.assertEqual(result.tests[0].contract,result.contracts[0])
+        self.assertEqual(result.tests[0].test_code,VALID)
+
     async def test_dangerous_and_invalid_syntax_are_returned_rejected(self):
         for code in ['def broken(', VALID.replace('choose([])', 'eval("1+1")')]:
             def transform(data):

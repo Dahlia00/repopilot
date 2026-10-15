@@ -42,7 +42,7 @@ class Compatibility(BaseModel):
 
 
 def contract_is_grounded(contract, sources):
-    if contract is None or contract.behavior_ambiguous:
+    if contract is None:
         return False
     grounded = (contract.contract_source in {'repository_context', 'existing_tests'}
             and contract.desired_behavior_confidence >= 90
@@ -79,7 +79,7 @@ def normalize_contract(contract, sources, finding_id, file, function):
     if not identity or not contract_is_grounded(contract, sources):
         return contract.model_copy(update={'finding_id':finding_id, 'file':file, 'function':function,
                                           'behavior_ambiguous':True})
-    return contract
+    return contract.model_copy(update={'behavior_ambiguous':False})
 
 
 class Unknown(Exception):
