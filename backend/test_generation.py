@@ -215,6 +215,42 @@ def validate_code(proposal: TestProposal, module_name: str, function_name: str) 
     return []
 
 
+def existing_test_artifact(finding, function, module_name, evidence_sources, contract=None):
+    """Adapt supported repository assertions into the existing isolated-test format."""
+    derived = contract_from_existing_tests(evidence_sources, finding.finding_id, finding.file, function)
+    if derived is None:
+        return None
+    # A grounded model contract retains precedence; unrelated expectations cannot replace it.
+    if contract is not None and not contract.behavior_ambiguous:
+        if contract.cases != derived.cases:
+            return None
+        selected_contract = contract
+    else:
+        selected_contract = derived
+    try:
+        tree = ast.parse(evidence_sources[derived.evidence_path])
+        imports = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
+        for node in imports:
+            if isinstance(node, ast.ImportFrom):
+                node.module = module_name  # Canonical import of the same, deterministically located file.
+        bodies = [statement for node in tree.body if isinstance(node, ast.FunctionDef) for statement in node.body]
+        test_name = 'test_existing_repository_cases'
+        test = ast.FunctionDef(name=test_name, args=ast.arguments(posonlyargs=[],args=[],kwonlyargs=[],kw_defaults=[],defaults=[]),
+            body=bodies, decorator_list=[])
+        code = ast.unparse(ast.fix_missing_locations(ast.Module(body=[*imports,test],type_ignores=[]))) + '\n'
+        proposal = TestProposal(finding_id=finding.finding_id, file=finding.file, framework='pytest',
+            test_name=test_name, test_code=code,
+            purpose=f'Existing repository test: {derived.evidence_path}. Reuses its supported assertions without executing discovery code.',
+            expected_behavior=derived.desired_behavior, execution_safe=True)
+        errors = validate_code(proposal, module_name, function)
+        if errors or test_cases(code,function) != selected_contract.cases:
+            return None
+        return ValidatedProposal(**proposal.model_dump(),finding_title=finding.title,
+            validation_errors=[],contract=selected_contract)
+    except (Unknown, SyntaxError, ValueError, TypeError, RecursionError):
+        return None
+
+
 from observability import stage
 
 @stage('tests.generated')
@@ -243,10 +279,16 @@ async def generate_tests(review: ReviewResponse, repository: RepositoryContext,
             module_name = module_name[:-9]
         if not all(part.isidentifier() and not keyword.iskeyword(part) for part in module_name.split('.')):
             reason = 'File path cannot be imported as a Python module.'
-        if attempts >= MAX_PROPOSALS:
-            reason = reason or 'Generation limit of five findings reached.'
         if reason:
             skipped.append(SkippedFinding(finding_id=finding.finding_id, file=finding.file, title=finding.title, reason=reason))
+            continue
+        existing = existing_test_artifact(finding, function, module_name, evidence_sources)
+        if attempts >= MAX_PROPOSALS or len(proposals) >= MAX_PROPOSALS:
+            if existing is not None and len(proposals) < MAX_PROPOSALS:
+                proposals.append(existing)
+                contracts.append(existing.contract)
+            else:
+                skipped.append(SkippedFinding(finding_id=finding.finding_id, file=finding.file, title=finding.title, reason='Generation limit of five findings reached.'))
             continue
         payload = {'finding': finding.model_dump(), 'file': finding.file,
                    'finding_id': finding.finding_id, 'target_module': module_name,
@@ -255,6 +297,10 @@ async def generate_tests(review: ReviewResponse, repository: RepositoryContext,
         text = json.dumps(payload, ensure_ascii=False)
         cost = len(INSTRUCTIONS) + len(text) + schema_chars
         if cost > MAX_INPUT_CHARS or input_chars + cost > MAX_TOTAL_INPUT_CHARS:
+            if existing is not None:
+                proposals.append(existing)
+                contracts.append(existing.contract)
+                continue
             skipped.append(SkippedFinding(finding_id=finding.finding_id, file=finding.file, title=finding.title, reason='Test generation input budget reached.'))
             continue
         used_paths = {context.path for context in review.repository_context if finding.file in context.used_for}
@@ -277,18 +323,43 @@ async def generate_tests(review: ReviewResponse, repository: RepositoryContext,
                 raise ValueError('Incomplete response')
             result = ModelProposal.model_validate(response.output_parsed)
         except AuthenticationError as exc:
+            if existing is not None:
+                proposals.append(existing)
+                contracts.append(existing.contract)
+                continue
             raise HTTPException(502, 'OpenAI rejected the backend API key for test generation.') from exc
         except RateLimitError as exc:
+            if existing is not None:
+                proposals.append(existing)
+                contracts.append(existing.contract)
+                continue
             raise HTTPException(429, 'OpenAI test generation rate limit or quota reached.') from exc
         except APITimeoutError as exc:
+            if existing is not None:
+                proposals.append(existing)
+                contracts.append(existing.contract)
+                continue
             raise HTTPException(504, 'OpenAI test generation timed out.') from exc
         except APIError as exc:
+            if existing is not None:
+                proposals.append(existing)
+                contracts.append(existing.contract)
+                continue
             raise HTTPException(502, 'OpenAI test generation failed. Please try again.') from exc
         except (ValueError, ValidationError) as exc:
+            if existing is not None:
+                proposals.append(existing)
+                contracts.append(existing.contract)
+                continue
             raise HTTPException(502, 'OpenAI returned malformed or incomplete test proposal JSON.') from exc
         contract = normalize_contract(result.contract, evidence_sources, finding.finding_id, finding.file, function)
         if contract.behavior_ambiguous:
             contract = contract_from_existing_tests(evidence_sources, finding.finding_id, finding.file, function) or contract
+        reusable = existing_test_artifact(finding, function, module_name, evidence_sources, contract)
+        if reusable is not None and (contract.behavior_ambiguous or result.proposal is None):
+            proposals.append(reusable)
+            contracts.append(reusable.contract)
+            continue
         contracts.append(contract)
         if contract.behavior_ambiguous:
             skipped.append(SkippedFinding(finding_id=finding.finding_id, file=finding.file, title=finding.title,
@@ -309,6 +380,10 @@ async def generate_tests(review: ReviewResponse, repository: RepositoryContext,
             errors.append('Proposal file or finding ID does not match the reviewed finding.')
         if not proposal.execution_safe:
             errors.append(result.reason or 'The model marked this proposal unsafe.')
+        if errors and reusable is not None:
+            proposals.append(reusable)
+            contracts[-1] = reusable.contract
+            continue
         proposals.append(ValidatedProposal(**{**proposal.model_dump(), 'execution_safe': not errors},
                                             finding_title=finding.title, validation_errors=errors, contract=contract))
     safe = sum(proposal.execution_safe for proposal in proposals)

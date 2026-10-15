@@ -155,11 +155,29 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.tests[0].contract,result.contracts[0])
         self.assertEqual(result.tests[0].test_code,VALID)
 
+    async def test_safe_generated_proposal_keeps_precedence_over_reused_test(self):
+        repo=repository()
+        repo.context_files.append(ContextFile(path='test_sample.py',reason='Existing test',content=VALID))
+        result=await self.generate(repository_data=repo)
+        self.assertEqual(result.safe_tests,1)
+        self.assertEqual(result.tests[0].test_code,VALID)
+        self.assertNotIn('Existing repository test:',result.tests[0].purpose)
+
+    async def test_rejected_generated_proposal_can_reuse_safe_existing_test(self):
+        repo=repository()
+        repo.context_files.append(ContextFile(path='test_sample.py',reason='Existing test',content=VALID))
+        def transform(data):
+            data['proposal']['test_code']=VALID.replace('choose([])','eval("unsafe")')
+            return data
+        result=await self.generate(transform,repository_data=repo)
+        self.assertEqual((result.safe_tests,result.rejected_tests),(1,0))
+        self.assertIn('Existing repository test:',result.tests[0].purpose)
+        self.assertNotIn('eval(',result.tests[0].test_code)
+
     async def test_grounded_model_contract_takes_precedence_over_test_fallback(self):
         repo=repository()
         repo.context_files.append(ContextFile(path='test_sample.py',reason='Existing test',content=VALID))
-        with patch('test_generation.contract_from_existing_tests',side_effect=AssertionError('Grounded contract must win')):
-            result=await self.generate(repository_data=repo)
+        result=await self.generate(repository_data=repo)
         self.assertEqual(result.contracts[0].contract_source,'repository_context')
         self.assertEqual(result.safe_tests,1)
 

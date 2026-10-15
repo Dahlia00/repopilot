@@ -101,7 +101,8 @@ def contract_from_existing_tests(sources, finding_id, file, function):
                     continue  # A module docstring provides no cases.
                 if isinstance(node, ast.Import) and len(node.names) == 1 and node.names[0].name == 'pytest':
                     bound = node.names[0].asname or 'pytest'
-                elif (isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == module
+                elif (isinstance(node, ast.ImportFrom) and node.level == 0 and (node.module == module or (PurePosixPath(path).parent == PurePosixPath(file).parent
+                           and node.module == PurePosixPath(file).stem))
                       and len(node.names) == 1 and node.names[0].name == function):
                     bound = node.names[0].asname or function
                 elif (isinstance(node, ast.FunctionDef) and node.name.startswith('test_')
