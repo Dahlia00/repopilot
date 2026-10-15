@@ -4,6 +4,7 @@ Never compile/eval/import proposed code. Constant propagation is deliberately
 limited; unknown semantics fail closed rather than becoming approval evidence.
 """
 import ast
+from numeric_arithmetic import arithmetic, same_outcome
 from pathlib import PurePosixPath
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
@@ -221,6 +222,11 @@ def static_outcome(code, function, arguments):
     def expr(n):
         budget[0]-=1
         if budget[0]<0: raise Unknown('Compatibility step budget exceeded.')
+        if isinstance(n,ast.BinOp):
+            try:
+                return arithmetic(n, env, budget)
+            except (ValueError, OverflowError) as exc:
+                raise Unknown(str(exc)) from exc
         if isinstance(n,ast.Constant): return n.value
         if isinstance(n,ast.Name) and n.id in env: return env[n.id]
         if isinstance(n,ast.UnaryOp) and isinstance(n.op,ast.Not): return not expr(n.operand)
@@ -285,10 +291,10 @@ def compatibility(fix, test, sources):
         for case in contract.cases:
             expected=(case.outcome,case.exception if case.outcome=='raises' else case.value)
             outcome = static_outcome(fix.fixed_code,contract.function,case.arguments)
-            if outcome != expected or type(outcome[1]) is not type(expected[1]):
+            if not same_outcome(outcome, expected):
                 return Compatibility(reason='Proposed fix does not satisfy the regression test/desired outcome.',behavior_ambiguous=False)
             before = static_outcome(fix.original_code,contract.function,case.arguments)
-            changed |= before != expected or type(before[1]) is not type(expected[1])
+            changed |= not same_outcome(before, expected)
         if not changed:
             return Compatibility(reason='Cases already pass before the fix; they do not demonstrate a regression.',behavior_ambiguous=False)
     except (Unknown,ValueError,TypeError,SyntaxError,RecursionError) as e:
