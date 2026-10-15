@@ -1,4 +1,4 @@
-def apply_discount(price: float, percent: float) -> float:
+def apply_discount(price, percent):
     """Return the price after applying a percentage discount.
 
     percent must be between 0 and 100.
