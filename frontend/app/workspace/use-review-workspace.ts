@@ -5,7 +5,7 @@ import type {AgentReview} from '../agent-dashboard';
 import type {TestGeneration} from '../generated-tests';
 import type {FixGeneration, FixArtifact} from '../proposed-fixes';
 import type {FixVerification} from '../fix-verification';
-import {verificationRequest, assertSelectedResult} from './proposal-identity';
+import {submitVerification} from './proposal-identity';
 const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export default function useReviewWorkspace() {
@@ -229,19 +229,7 @@ export default function useReviewWorkspace() {
     setVerificationError('');
     setVerifying(true);
     try {
-      const request = verificationRequest(fix, artifactsSource);
-      const response = await fetch(`${apiUrl.replace(/\/$/, '')}/verify-fix`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-        signal: AbortSignal.timeout(210000),
-      });
-      if (!response.ok) {
-        const body: { detail?: unknown } = await response.json().catch(() => ({}));
-        throw new Error(typeof body.detail === 'string' ? body.detail : `Verification failed (HTTP ${response.status}).`);
-      }
-      const result = (await response.json()) as FixVerification['results'][number];
-      assertSelectedResult(fix, result);
+      const result = await submitVerification(fix, artifactsSource, apiUrl);
       setVerification({ repository: artifactsSource.repository, pull_request: artifactsSource.pull_request, head_sha: artifactsSource.head_sha,
         results: [result], fixes_verified: result.status === 'SKIPPED' ? 0 : 1,
         passed: result.status === 'PASSED' ? 1 : 0, failed: result.status === 'FAILED' ? 1 : 0,

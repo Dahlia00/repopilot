@@ -18,12 +18,31 @@ export function verificationRequest(fix:FixArtifact,source:FixGeneration) {
   const artifacts=source.test_artifacts;
   const tests=artifacts?.head_sha===source.head_sha && artifacts.repository===source.repository && artifacts.pull_request===source.pull_request
     ? artifacts.tests.filter(test=>test.execution_safe && test.file===fix.file && fix.contract &&
-      artifactIdentity(test.contract)===artifactIdentity(fix.contract) && artifacts.findings.some(finding=>
-        finding.finding_id===test.finding_id && finding.file===fix.file && finding.line===fix.finding?.line)) : [];
+      !fix.contract.behavior_ambiguous && test.finding_id===fix.contract.finding_id && test.contract?.file===fix.file &&
+      artifactIdentity(test.contract)===artifactIdentity(fix.contract)) : [];
+  if(tests.length!==1) throw new Error(tests.length>1
+    ? 'Verification not started: multiple safe saved tests match this contract. Regenerate tests and fixes to resolve the ambiguous artifact selection.'
+    : 'Verification not started: no exact safe saved test matches this fix contract and repository/PR/head snapshot. Generate tests, then regenerate fixes using those test artifacts.');
   return {repository:source.repository,pull_request:source.pull_request,head_sha:source.head_sha,
-    finding:fix.finding,validated_fix:fix,validated_test:tests?.length===1?tests[0]:null};
+    finding:fix.finding,validated_fix:fix,validated_test:tests[0]};
 }
 export function assertSelectedResult(fix:FixArtifact,result:FixVerification['results'][number]) {
   if(result.file!==fix.file || result.title!==fix.title || result.finding_id!==fix.finding_id || !result.proposal ||
     proposalIdentity(result.proposal)!==proposalIdentity(fix)) throw new Error('Verification returned a different proposal. No approval was recorded for the selected fix.');
+}
+
+/** Shared network boundary used by the workspace handler; validate before fetch. */
+export async function submitVerification(fix:FixArtifact,source:FixGeneration,apiUrl:string,fetcher:typeof fetch=fetch) {
+  const request=verificationRequest(fix,source);
+  const response=await fetcher(`${apiUrl.replace(/\/$/, '')}/verify-fix`,{
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request),
+    signal:AbortSignal.timeout(210000),
+  });
+  if(!response.ok) {
+    const body:{detail?:unknown}=await response.json().catch(()=>({}));
+    throw new Error(typeof body.detail==='string'?body.detail:`Verification failed (HTTP ${response.status}).`);
+  }
+  const result=await response.json() as FixVerification['results'][number];
+  assertSelectedResult(fix,result);
+  return result;
 }
