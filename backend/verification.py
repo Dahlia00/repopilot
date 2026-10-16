@@ -1,5 +1,7 @@
 """Fail-closed verification of restricted Python proposals in disposable workspaces."""
 import ast
+import math
+from numeric_arithmetic import arithmetic, arithmetic_shape
 import asyncio
 from collections import Counter
 import difflib
@@ -301,13 +303,18 @@ def execution_source_errors(content: str, function: str) -> list[str]:
 def computation_errors(tree: ast.AST, descend=True) -> list[str]:
     """Reject obvious allocation bombs where macOS lacks portable memory limits."""
     for node in ast.walk(tree) if descend else [tree]:
-        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and abs(node.value) > 10000:
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and (abs(node.value) > 10000 or not math.isfinite(node.value)):
             return ['Large numeric literals are outside the restricted execution budget.']
         if isinstance(node, ast.BinOp):
-            if isinstance(node.op, (ast.Mult, ast.Pow, ast.Mod, ast.LShift, ast.RShift)):
-                return ['Multiplication, exponentiation, percent formatting and shifts are not supported for execution.']
-            if isinstance(node.op, ast.Add) and not isinstance(node.left, ast.Constant) and not isinstance(node.right, ast.Constant):
-                return ['Potentially expanding concatenation is not supported for execution.']
+            if not arithmetic_shape(node):
+                return ['Arithmetic accepts only bounded numeric arguments/literals and Add/Sub/Mult/Div; containers, calls and other operators are rejected.']
+            # Constant-only expressions can be checked now; names are resolved by
+            # compatibility against exact literal test cases before pytest is allowed.
+            if not any(isinstance(n, ast.Name) for n in ast.walk(node)):
+                try:
+                    arithmetic(node, {})
+                except (ValueError, OverflowError) as exc:
+                    return [str(exc)]
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'range':
             return ['Computed ranges are not supported for execution.']
     return []

@@ -199,12 +199,15 @@ async def review_patches(pr: PullRequestResponse, client: AsyncOpenAI,
             if response.status != 'completed' or response.output_parsed is None:
                 raise ValueError('Incomplete or refused model response')
             result = ModelReview.model_validate(response.output_parsed)
+            accepted_findings: list[Finding] = []
             for finding in result.findings:
                 if finding.file != file.path:
-                    raise ValueError('Finding refers to another file')
+                    warnings.append(f'{file.path}: ignored a model finding referring to another file')
+                    continue
                 if finding.line is not None and not 1 <= finding.line <= len(file.content.splitlines()):
                     raise ValueError('Finding line is not present in the full changed file')
-            findings.extend(result.findings)
+                accepted_findings.append(finding)
+            findings.extend(accepted_findings)
             reviewed_files.append(file.path)
             for context in included:
                 if context.path not in used_context:

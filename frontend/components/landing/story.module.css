@@ -1,0 +1,4 @@
+.story { position:relative;isolation:isolate;background:linear-gradient(180deg,#04051a 0%,#090d28 27%,#171e39 49%,#15263a 76%,#131a32 100%); }
+.backdrop { position:absolute;inset:0;z-index:-1;pointer-events:none;overflow:hidden; }
+.grid { position:absolute;inset:0;background-image:linear-gradient(#909cdb09 1px,transparent 1px),linear-gradient(90deg,#909cdb09 1px,transparent 1px);background-size:64px 64px;mask-image:linear-gradient(90deg,transparent 10%,#000 85%); }
+.stars { position:absolute;inset:0 0 auto;height:100svh;opacity:.55; }

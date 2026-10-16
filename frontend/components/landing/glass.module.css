@@ -1,0 +1,74 @@
+.card {
+  --glow: #7c6cff;
+  --edge: rgba(167, 155, 255, .42);
+  position: relative;
+  border-radius: .75em;
+  border: 1px solid var(--edge);
+  /* --lift (0 by default) is raised inside lit scenes: glass lightens, bloom recedes, the rim sharpens. */
+  border-color: color-mix(in srgb, var(--edge), #c3c9ff calc(var(--lift, 0) * 45%));
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, calc(.09 + var(--lift, 0) * .05)), rgba(255, 255, 255, 0) 38%),
+    linear-gradient(180deg,
+      color-mix(in srgb, rgba(27, 26, 72, .94), #3b4190 calc(var(--lift, 0) * 36%)),
+      color-mix(in srgb, rgba(11, 13, 40, .96), #262b6c calc(var(--lift, 0) * 36%)));
+  color: #eef0ff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, calc(.14 + var(--lift, 0) * .1)),
+    inset 0 0 1.5em color-mix(in srgb, var(--glow) calc(14% - var(--lift, 0) * 6%), transparent),
+    0 0 0 1px rgba(5, 6, 26, calc(.35 - var(--lift, 0) * .2)),
+    0 .9em 2.4em rgba(30, 32, 100, calc(.45 - var(--lift, 0) * .22)),
+    0 0 1.6em color-mix(in srgb, var(--glow) calc(34% - var(--lift, 0) * 20%), transparent);
+  transition: box-shadow .45s cubic-bezier(.22, 1, .36, 1), border-color .45s, translate .45s cubic-bezier(.22, 1, .36, 1);
+}
+.card::before {
+  /* thin bright rim on the top edge, like light catching glass */
+  content: '';
+  position: absolute;
+  inset: -1px 12% auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--glow) 60%, #fff), transparent);
+  opacity: .8;
+}
+.card:hover {
+  border-color: color-mix(in srgb, var(--glow) 80%, #fff);
+  translate: 0 -.2em;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .2),
+    inset 0 0 1.8em color-mix(in srgb, var(--glow) 24%, transparent),
+    0 0 0 1px rgba(5, 6, 26, .35),
+    0 1.2em 2.8em rgba(4, 5, 24, .5),
+    0 0 2.6em color-mix(in srgb, var(--glow) 60%, transparent);
+}
+.strong { border-width: 1.5px; }
+.card[data-tone='blue'] { --glow: #4f7dff; --edge: rgba(122, 156, 255, .45); }
+.card[data-tone='cyan'] { --glow: #38cff8; --edge: rgba(103, 220, 255, .45); }
+.card[data-tone='success'] { --glow: #2ee6a0; --edge: rgba(74, 236, 170, .55); }
+.card[data-tone='danger'] { --glow: #ff4d6d; --edge: rgba(255, 110, 130, .5); }
+
+.file { padding: .8em .9em .75em; }
+.fileName { display: flex; align-items: center; gap: .45em; font: 600 .8em/1 var(--font-code); color: #f2f1ff; }
+.fileName svg { color: #b6acff; }
+.code { display: grid; gap: .42em; margin: .8em 0 .7em; }
+.code i { display: block; height: .22em; border-radius: 1em; opacity: .85; }
+.diff { display: flex; gap: .5em; font: 700 1em/1 var(--font-code); letter-spacing: -.02em; }
+.diff span:first-child { color: #4ff0b0; text-shadow: 0 0 .8em rgba(79, 240, 176, .55); }
+.diff span:last-child { color: #ff6b81; text-shadow: 0 0 .8em rgba(255, 107, 129, .5); }
+
+.list { padding: .9em 1em 1em; }
+.listTitle { display: flex; align-items: center; gap: .55em; font-size: .8em; font-weight: 600; letter-spacing: -.005em; color: #fff; }
+.listTitle svg { color: #c3baff; }
+.list ul { list-style: none; margin: .75em 0 0; padding: 0; display: grid; gap: .55em; }
+.list li { display: flex; align-items: center; gap: .55em; font: 500 .72em/1.2 var(--font-code); color: #d7dbf5; }
+.list li svg { color: #a99cff; flex-shrink: 0; }
+.card[data-tone='cyan'] .list li svg, .card[data-tone='cyan'] .listTitle svg { color: #7ddcff; }
+.card[data-tone='blue'] .list li svg, .card[data-tone='blue'] .listTitle svg { color: #93b0ff; }
+
+.check { display: flex; align-items: center; gap: .75em; padding: .8em .85em; }
+.checkIcon { display: grid; place-items: center; width: 2.2em; height: 2.2em; border-radius: .55em; background: rgba(46, 230, 160, .1); color: #6ff5c2; flex-shrink: 0; }
+.checkText { display: grid; gap: .2em; min-width: 0; flex: 1; }
+.checkText strong { font-size: .76em; font-weight: 600; color: #fff; white-space: nowrap; }
+.checkText small { font-size: .66em; color: #8ff0c8; }
+.tick { display: grid; place-items: center; width: 1.45em; height: 1.45em; border-radius: 50%; background: #22d68f; color: #04271a; box-shadow: 0 0 1em rgba(46, 230, 160, .7); flex-shrink: 0; }
+
+.tile { display: grid; place-items: center; aspect-ratio: 1; border-radius: 1em; color: #fff; }
+.tile svg { filter: drop-shadow(0 0 .6em rgba(140, 170, 255, .6)); }

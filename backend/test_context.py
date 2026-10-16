@@ -108,9 +108,9 @@ class ContextRetrievalTests(unittest.IsolatedAsyncioTestCase):
         return httpx.Response(200, json={'encoding': 'base64', 'size': len(content),
             'content': 1 if self.bad_blob else base64.b64encode(content).decode()})
 
-    async def build(self, pr=None):
+    async def build(self, pr=None, **kwargs):
         async with httpx.AsyncClient(base_url='https://api.github.com', transport=httpx.MockTransport(self.transport)) as client:
-            return await build_repository_context(pr or make_pr(), client)
+            return await build_repository_context(pr or make_pr(), client, **kwargs)
 
     async def test_full_content_and_context_at_fork_head_commit(self):
         result = await self.build()
@@ -121,6 +121,21 @@ class ContextRetrievalTests(unittest.IsolatedAsyncioTestCase):
                          ['README.md', 'pkg/helper.py', 'pkg/README.md', 'pkg/__init__.py'])
         self.assertNotIn('pkg/unrelated.py', [file.path for file in result.context_files])
         self.assertEqual(len(self.requests), 6)  # One tree, five selected blobs, no archive/clone.
+
+    async def test_saved_evidence_is_retrieved_with_existing_limits(self):
+        self.sources['pkg/test_main.py']=b'from pkg.main import main\ndef test_main():\n    assert main(1) == 1\n'
+        with patch('context.MAX_CONTEXT_FILES',1):
+            result=await self.build(evidence_paths=('pkg/test_main.py',))
+        self.assertEqual([f.path for f in result.context_files],['pkg/test_main.py'])
+        self.assertEqual(result.context_files[0].content,self.sources['pkg/test_main.py'].decode())
+        self.assertTrue(any('Context file limit' in warning for warning in result.warnings))
+
+    async def test_missing_or_excluded_saved_evidence_is_not_trusted(self):
+        self.sources['pkg/link.py']=b'not trusted'
+        self.entry_overrides['pkg/link.py']={'mode':'120000'}
+        result=await self.build(evidence_paths=('pkg/link.py','missing.py','../outside.py'))
+        self.assertFalse(any(f.path in {'pkg/link.py','missing.py','../outside.py'} for f in result.context_files))
+        self.assertEqual(sum('saved contract evidence unavailable' in warning for warning in result.warnings),3)
 
     async def test_readme_is_optional(self):
         del self.sources['README.md']

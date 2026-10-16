@@ -1,0 +1,51 @@
+.wrap {
+  position: relative;
+  /* --lift (0→1, set on the section from the story progress) cleans up the materials as the light
+     arrives: softer bloom, crisper outlines, lighter glass. */
+  --halo: calc(1 - var(--lift, 1) * .55);
+}
+/* Distant cubes sit in the haze: they resolve last, from soft and faint to crisp. */
+.cube {
+  opacity:.5;
+  filter:none;
+}
+.wrap::before {
+  /* soft violet pool of light under the graph */
+  content: '';
+  position: absolute;
+  inset: 8% 4% 0;
+  z-index: -1;
+  background: radial-gradient(50% 46% at 50% 52%, rgba(120, 96, 255, .2), rgba(80, 210, 255, .1) 55%, transparent 75%);
+}
+.node { transition: opacity .45s cubic-bezier(.22, 1, .36, 1); }
+.node[data-dimmed] { opacity: .55; }
+
+.hub { padding: 1.05em 1.2em 1.15em; }
+.hub::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  border: 1px solid rgba(170, 155, 255, .8);
+  opacity:.3;
+  pointer-events: none;
+}
+@keyframes hub-ring {
+  0% { opacity: .7; transform: scale(1); }
+  80%, 100% { opacity: 0; transform: scale(1.08, 1.18); }
+}
+.hubHead { display: flex; align-items: center; justify-content: space-between; color: #c6bdff; }
+.hubHead span { display: inline-flex; align-items: center; gap: .55em; font-size: 1.02em; font-weight: 700; letter-spacing: .02em; color: #fff; }
+.hubHead span svg { color: #b3a8ff; }
+.hubStat { display: flex; justify-content: flex-end; gap: .5em; margin-top: .35em; font: 700 1.05em/1 var(--font-code); }
+.hubStat span:first-child { color: #4ff0b0; text-shadow: 0 0 .8em rgba(79, 240, 176, .5); }
+.hubStat span:last-child { color: #ff6b81; text-shadow: 0 0 .8em rgba(255, 107, 129, .5); }
+.hub p { margin: .5em 0 .9em; font-size: .78em; color: #c3c7e6; }
+.hubBar { display: flex; gap: .2em; height: .3em; }
+.hubBar i { border-radius: 1em; }
+.hubBar i:first-child { flex: 42; background: linear-gradient(90deg, #22d68f, #4ff0b0); box-shadow: 0 0 .7em rgba(79, 240, 176, .55); }
+.hubBar i:last-child { flex: 6; background: #ff5a76; box-shadow: 0 0 .7em rgba(255, 90, 118, .55); }
+
+@media (prefers-reduced-motion: reduce) {
+  .hub::after { animation: none; opacity: 0; }
+}

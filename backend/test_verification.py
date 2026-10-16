@@ -60,7 +60,7 @@ class ExecutionGateTests(unittest.TestCase):
                      'def choose(values):\n    return values.__class__',
                      'def choose(values):\n    return list(range(10000))',
                      'def choose(values):\n    return "a" * 10000',
-                     'def choose(values):\n    return values + values',
+                     'def choose(values):\n    return [] + values',
                      'def choose(values):\n    len = values\n    return len([])']:
             self.assertTrue(execution_source_errors(code,'choose'))
 

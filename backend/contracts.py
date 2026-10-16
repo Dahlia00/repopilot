@@ -4,6 +4,8 @@ Never compile/eval/import proposed code. Constant propagation is deliberately
 limited; unknown semantics fail closed rather than becoming approval evidence.
 """
 import ast
+from numeric_arithmetic import arithmetic, same_outcome
+from pathlib import PurePosixPath
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,7 +44,7 @@ class Compatibility(BaseModel):
 
 
 def contract_is_grounded(contract, sources):
-    if contract is None or contract.behavior_ambiguous:
+    if contract is None:
         return False
     grounded = (contract.contract_source in {'repository_context', 'existing_tests'}
             and contract.desired_behavior_confidence >= 90
@@ -79,7 +81,81 @@ def normalize_contract(contract, sources, finding_id, file, function):
     if not identity or not contract_is_grounded(contract, sources):
         return contract.model_copy(update={'finding_id':finding_id, 'file':file, 'function':function,
                                           'behavior_ambiguous':True})
-    return contract
+    return contract.model_copy(update={'behavior_ambiguous':False})
+
+
+def contract_from_existing_tests(sources, finding_id, file, function):
+    """Extract literal expectations from a narrowly supported test module, never execute it."""
+    module = '.'.join(PurePosixPath(file).with_suffix('').parts)
+    if module.endswith('.__init__'):
+        module = module[:-9]
+    for path, code in sorted(sources.items()):
+        if path == file or not path.endswith('.py'):
+            continue
+        try:
+            tree = ast.parse(code)
+            imports = []
+            statements = []
+            names = set()
+            for node in tree.body:
+                if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                    continue  # A module docstring provides no cases.
+                if isinstance(node, ast.Import) and len(node.names) == 1 and node.names[0].name == 'pytest':
+                    bound = node.names[0].asname or 'pytest'
+                elif (isinstance(node, ast.ImportFrom) and node.level == 0 and (node.module == module or (PurePosixPath(path).parent == PurePosixPath(file).parent
+                           and node.module == PurePosixPath(file).stem))
+                      and len(node.names) == 1 and node.names[0].name == function):
+                    bound = node.names[0].asname or function
+                elif (isinstance(node, ast.FunctionDef) and node.name.startswith('test_')
+                      and not node.decorator_list and not node.returns and not node.type_comment
+                      and not node.args.posonlyargs and not node.args.args and not node.args.kwonlyargs
+                      and not node.args.vararg and not node.args.kwarg):
+                    if node.name in names:
+                        raise Unknown('Rebound test name.')
+                    names.add(node.name)
+                    for statement in node.body:
+                        if not isinstance(statement, (ast.Assert, ast.With)):
+                            raise Unknown('Unsupported test statement.')
+                        statements.append(statement)
+                    continue
+                else:
+                    raise Unknown('Unsupported imports or module side effects.')
+                if bound in names or bound.startswith('__'):
+                    raise Unknown('Rebound or unsafe import alias.')
+                names.add(bound)
+                imports.append(node)
+            # Parse each exact statement with its imports. This excludes extra calls,
+            # fixtures, control flow, assignments, and unsupported assertions.
+            preamble = '\n'.join(ast.get_source_segment(code, n) for n in imports)
+            for statement in statements:
+                if isinstance(statement, ast.Assert) and statement.msg is not None:
+                    raise Unknown('Unsupported assertion message.')
+                # Preserve indentation within with blocks by using the original lines.
+                lines = code.splitlines()
+                snippet = '\n'.join(line[statement.col_offset:] for line in lines[statement.lineno-1:statement.end_lineno])
+                extracted = test_cases(preamble + '\n' + snippet, function)
+                if len(extracted) != 1:
+                    raise Unknown('Each statement must establish one supported case.')
+                if extracted[0].outcome == 'raises' and extracted[0].exception not in {
+                    'ValueError','IndexError','TypeError','KeyError','ZeroDivisionError','AssertionError'}:
+                    raise Unknown('Unsupported exception.')
+            cases = test_cases(code, function)
+            # Exact, bounded source evidence also remains parseable by grounding.
+            quote = code.strip()
+            if len(quote) > 2000 or not statements:
+                continue
+            candidate = BehavioralContract(finding_id=finding_id, file=file, function=function,
+                current_behavior='See review finding and source.',
+                problem='Existing tests establish expected behavior for the reviewed function.',
+                desired_behavior=quote, desired_behavior_confidence=100,
+                contract_source='existing_tests', evidence_path=path, evidence_quote=quote,
+                cases=cases)
+            normalized = normalize_contract(candidate, sources, finding_id, file, function)
+            if not normalized.behavior_ambiguous:
+                return normalized
+        except (Unknown, SyntaxError, ValueError, TypeError, RecursionError):
+            continue
+    return None
 
 
 class Unknown(Exception):
@@ -146,6 +222,11 @@ def static_outcome(code, function, arguments):
     def expr(n):
         budget[0]-=1
         if budget[0]<0: raise Unknown('Compatibility step budget exceeded.')
+        if isinstance(n,ast.BinOp):
+            try:
+                return arithmetic(n, env, budget)
+            except (ValueError, OverflowError) as exc:
+                raise Unknown(str(exc)) from exc
         if isinstance(n,ast.Constant): return n.value
         if isinstance(n,ast.Name) and n.id in env: return env[n.id]
         if isinstance(n,ast.UnaryOp) and isinstance(n.op,ast.Not): return not expr(n.operand)
@@ -210,10 +291,10 @@ def compatibility(fix, test, sources):
         for case in contract.cases:
             expected=(case.outcome,case.exception if case.outcome=='raises' else case.value)
             outcome = static_outcome(fix.fixed_code,contract.function,case.arguments)
-            if outcome != expected or type(outcome[1]) is not type(expected[1]):
+            if not same_outcome(outcome, expected):
                 return Compatibility(reason='Proposed fix does not satisfy the regression test/desired outcome.',behavior_ambiguous=False)
             before = static_outcome(fix.original_code,contract.function,case.arguments)
-            changed |= before != expected or type(before[1]) is not type(expected[1])
+            changed |= not same_outcome(before, expected)
         if not changed:
             return Compatibility(reason='Cases already pass before the fix; they do not demonstrate a regression.',behavior_ambiguous=False)
     except (Unknown,ValueError,TypeError,SyntaxError,RecursionError) as e:

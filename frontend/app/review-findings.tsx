@@ -1,3 +1,6 @@
+'use client';
+import {useState} from 'react';
+import DiffView, {type DiffFile} from './workspace/diff-view';
 export type Finding = {
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
   category: 'Security' | 'Bug' | 'Performance' | 'Error Handling' | 'Code Quality';
@@ -9,80 +12,44 @@ export type Finding = {
   confidence: number;
 };
 
-const severities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
-
-export default function ReviewFindings({
-  findings,
-  reviewedFiles,
-  skippedFiles,
-}: {
-  findings: Finding[];
-  reviewedFiles: string[];
-  skippedFiles: string[];
+export default function ReviewFindings({findings, reviewedFiles, skippedFiles, files=[], fileScopeLabel='Reviewed files'}: {
+  findings:(Omit<Finding,'confidence'> & {confidence:number|null;id?:string;source?:string;status?:string;confidenceKnown?:boolean;ruleId?:string})[];
+  reviewedFiles:string[];skippedFiles:string[];files?:DiffFile[];fileScopeLabel?:string;
 }) {
-  return (
-    <section className="ai-results" aria-labelledby="ai-title">
-      <div className="section-heading">
-        <h2 id="ai-title">AI review findings</h2>
-        <span className="muted small" role="status">
-          {findings.length} findings
-        </span>
-      </div>
-      <p className="muted small">
-        {reviewedFiles.length} files reviewed · Full changed files reviewed with selected repository
-        context.
-      </p>
-      <div className="severity-summary" aria-label="Finding counts by severity">
-        {severities.map((severity) => (
-          <span className={`severity ${severity.toLowerCase()}`} key={severity}>
-            {severity}: {findings.filter((finding) => finding.severity === severity).length}
-          </span>
-        ))}
-      </div>
-      {skippedFiles.length > 0 && (
-        <div className="notice">
-          <p>Skipped {skippedFiles.length} files; see repository context below for reasons:</p>
-          <ul>
-            {skippedFiles.map((file) => (
-              <li key={file}>
-                <code>{file}</code>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {findings.length === 0 ? (
-        <p className="empty muted">
-          {reviewedFiles.length === 0
-            ? 'No changed files could be reviewed within the available content and limits.'
-            : 'The AI reported no actionable findings in the reviewed changes.'}
-        </p>
-      ) : (
-        <div className="finding-list">
-          {findings.map((finding, index) => (
-            <article className="finding" key={`${finding.file}:${finding.line}:${index}`}>
-              <div className="finding-meta">
-                <span className={`severity ${finding.severity.toLowerCase()}`}>
-                  {finding.severity}
-                </span>
-                <span className="tag">AI</span>
-                <span>{finding.category}</span>
-                <span className="confidence">{finding.confidence}% confidence</span>
-              </div>
-              <p className="finding-location">
-                <code>{finding.file}</code>
-                {finding.line !== null && <span> · Line {finding.line}</span>}
-              </p>
-              <h3>{finding.title}</h3>
-              <p>{finding.explanation}</p>
-              <div className="fix">
-                <span>SUGGESTED FIX</span>
-                <p>{finding.suggested_fix}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
-    </section>
-  );
+  const [selectedFile,setSelectedFile]=useState<string|null>(null);
+  const [selectedId,setSelectedId]=useState<string|null>(null);
+  const paths=[...new Set(findings.map(f=>f.file))];
+  const path=paths.includes(selectedFile ?? '')?selectedFile!:paths[0];
+  const scoped=findings.filter(f=>f.file===path);
+  const id=(f:typeof findings[number])=>f.id ?? `${f.file}:${f.line}:${f.title}`;
+  const current=scoped.find(f=>id(f)===selectedId) ?? scoped[0];
+  return <section className="findings-workspace" aria-label="Findings">
+    <div className="section-heading"><h2>Review observations</h2><span className="muted small">{findings.length} observations · {fileScopeLabel.toLowerCase()}: {reviewedFiles.length}</span></div>
+    {skippedFiles.length>0 && <details className="coverage-note"><summary>{skippedFiles.length} skipped files</summary><ul>{skippedFiles.map(f=><li className="mono" key={f}>{f}</li>)}</ul></details>}
+    {findings.length===0 ? <p className="section-empty">{reviewedFiles.length?'No actionable findings were returned. Check scanner and context coverage.':'No findings are available for this section.'}</p> :
+      <div className="finding-explorer">
+        <aside className="finding-files" aria-label="Files with findings"><div className="pane-heading">Files</div>
+          {paths.map(file=><button type="button" key={file} className={`file-selection ${file===path?'selected':''}`} aria-pressed={file===path}
+            onClick={()=>{setSelectedFile(file);setSelectedId(null);}} title={file}>
+            <span className="truncate mono">{file}</span><span className="mono">{findings.filter(f=>f.file===file).length}</span>
+          </button>)}
+        </aside>
+        <DiffView file={files.find(f=>f.filename===path)} line={current?.line} onLine={line=>{const f=scoped.find(f=>f.line===line);if(f)setSelectedId(id(f));}}/>
+        <aside className="finding-detail" aria-label="Finding details">
+          <div className="pane-heading">Observations in this file</div>
+          <div className="finding-choices">{scoped.map(f=><button type="button" key={id(f)} aria-pressed={id(f)===id(current)} className={id(f)===id(current)?'selected':''}
+            onClick={()=>setSelectedId(id(f))} title={f.title}><span className={`severity-dot ${f.severity.toLowerCase()}`}/><span className="truncate">{f.title}</span></button>)}</div>
+          <article className="finding-detail-body" key={id(current)}>
+            <div className="finding-meta"><span className={`severity ${current.severity.toLowerCase()}`}>{current.severity}</span><span className="tag truncate" title={current.source ?? 'AI'}>{current.source ?? 'AI'}</span></div>
+            <h3>{current.title}</h3>
+            <p className="mono muted small" title={current.file}>{current.line!==null?`Line ${current.line} · `:''}{current.category}</p>
+            {current.confidenceKnown!==false && <p className="muted small">{current.confidence}% confidence</p>}
+            {current.ruleId && <p className="mono muted small">{current.ruleId}</p>}
+            <span key={current.status} className={`verification-badge ${(current.status ?? 'Pending').toLowerCase().replaceAll(' ','-')}`}>{current.status ?? 'Pending'}</span>
+            <h4>Explanation</h4><p className="detail-explanation">{current.explanation}</p>
+            <h4>Suggested fix</h4>{current.suggested_fix?<pre className="suggestion-code"><code>{current.suggested_fix}</code></pre>:<p className="muted small">No code recommendation was returned for this observation.</p>}
+          </article>
+        </aside>
+      </div>}
+  </section>;
 }
