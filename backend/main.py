@@ -141,9 +141,15 @@ async def verify_existing_fix(
     if changed is None:
         raise HTTPException(422, 'Proposal file is not a changed file in this pull request.')
     try:
-        # Reuse bounded immutable retrieval, but only fetch the selected changed file.
+        # Preserve the supplied pair; re-fetch its authoritative evidence at this
+        # immutable head, even when that test file is not imported by the target.
+        if test is not None and (fix.contract is None or test.contract != fix.contract):
+            raise HTTPException(422, 'Fix and test must carry the exact same saved behavioral contract.')
+        evidence_paths = tuple(dict.fromkeys(c.evidence_path for c in [fix.contract, test.contract if test else None]
+                                             if c is not None and c.evidence_path))
         snapshot = await asyncio.wait_for(build_repository_context(
-            pr.model_copy(update={'files': [changed], 'changed_files': 1}), client), timeout=45)
+            pr.model_copy(update={'files': [changed], 'changed_files': 1}), client,
+            evidence_paths=evidence_paths), timeout=45)
         source = next((file for file in snapshot.changed_files if file.path == fix.file), None)
         target = target_function(source.content, finding.line) if source and source.content else None
         if target is None or finding.line is None or fix.original_code != ast.get_source_segment(source.content, target):
@@ -152,7 +158,8 @@ async def verify_existing_fix(
         tests = TestGenerationResponse(repository=pr.repository, pull_request=pr.pull_request, head_sha=pr.head_sha,
             findings=[identified], tests=[test] if test else [], skipped_findings=[],
             total_tests=int(test is not None), safe_tests=int(test is not None and test.execution_safe),
-            rejected_tests=int(test is not None and not test.execution_safe))
+            rejected_tests=int(test is not None and not test.execution_safe),
+            contracts=[test.contract] if test is not None and test.contract is not None else [])
         return await asyncio.wait_for(verify_one(fix, snapshot, tests), timeout=100)
     except asyncio.TimeoutError as exc:
         raise HTTPException(504, 'Deterministic verification timed out; temporary processes and files were cleaned up.') from exc

@@ -228,7 +228,8 @@ async def read_file(client: httpx.AsyncClient, repository: str, commit: str,
 from observability import stage
 
 @stage('context.selected')
-async def build_repository_context(pr: PullRequestResponse, client: httpx.AsyncClient) -> RepositoryContext:
+async def build_repository_context(pr: PullRequestResponse, client: httpx.AsyncClient, *,
+                                   evidence_paths: tuple[str, ...] = ()) -> RepositoryContext:
     warnings: list[str] = []
     data, _ = await github_json(client, f'/repos/{pr.head_repository}/git/trees/{pr.head_sha}',
                                params={'recursive': '1'}, max_response_bytes=MAX_TREE_RESPONSE_BYTES)
@@ -285,7 +286,16 @@ async def build_repository_context(pr: PullRequestResponse, client: httpx.AsyncC
         changed.append(item)
 
     selected: list[ContextFile] = []
-    candidates = select_candidates(changed, set(entries))
+    # Verification must re-fetch exact contract evidence, not rediscover it by imports.
+    # Only tree-validated regular files are eligible; existing byte/count budgets apply.
+    required = [FileMetadata(path=path, reason='Saved behavioral contract evidence')
+                for path in dict.fromkeys(evidence_paths) if path in entries]
+    for path in dict.fromkeys(evidence_paths):
+        if path not in entries:
+            warnings.append(f'{path}: saved contract evidence unavailable or excluded at the PR head commit')
+    candidates = required + [candidate for candidate in select_candidates(changed, set(entries))
+                             if candidate.path not in evidence_paths]
+    candidates = candidates[:MAX_CONTEXT_CANDIDATES]
     for candidate in candidates:
         if len(selected) >= MAX_CONTEXT_FILES:
             warnings.append(f'Context file limit ({MAX_CONTEXT_FILES}) reached; remaining candidates were omitted.')

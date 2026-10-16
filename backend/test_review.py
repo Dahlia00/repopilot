@@ -292,6 +292,79 @@ class ReviewEndpointTests(unittest.TestCase):
         self.assertEqual(response.json()['proposal'],selected.model_dump(mode='json'))
         self.assertEqual(response.json()['title'],selected.title)
 
+    def test_existing_discount_contract_survives_all_endpoints_with_evidence(self):
+        from test_verification import scans
+        from verification import Check
+        from contracts import static_outcome
+        implementation='backend/demo_discount.py'
+        test_path='backend/test_demo_discount.py'
+        before='def apply_discount(price, percent):\n    return price * (1 + percent / 100)\n'
+        after='def apply_discount(price, percent):\n    if percent > 100:\n        raise ValueError("invalid percent")\n    return price * (1 - percent / 100)'
+        test_source=('import pytest\nfrom demo_discount import apply_discount\n'
+            'def test_discount():\n    assert apply_discount(100, 20) == 80\n'
+            'def test_invalid():\n    with pytest.raises(ValueError):\n        apply_discount(100, 120)\n')
+        self.files=[{**FILES[0],'filename':implementation},
+                    {**FILES[1],'filename':test_path}]
+        self.full_sources={implementation:before,test_path:test_source}
+        finding={**FINDING,'file':implementation,'title':'Incorrect discount arithmetic'}
+        def handler(request):
+            body=json.loads(request.content)
+            payload=json.loads(body['input'])
+            name=body['text']['format']['name']
+            if name=='ModelReview':
+                return model_response([finding] if payload['file']==implementation else [])
+            if name=='ModelProposal':
+                result={'proposal':None,'contract':None,'reason':'Reuse repository tests.'}
+            else:
+                self.assertEqual(payload['behavioral_contract'],saved_contract)
+                self.assertEqual(payload['unexecuted_test_proposals'][0]['contract'],saved_contract)
+                result={'proposal':{'finding_id':payload['finding_id'],'file':implementation,
+                    'title':'Correct discount arithmetic','explanation':'Match repository expectations.',
+                    'original_code':payload['original_code'],'fixed_code':after,
+                    'confidence':95,'safe_to_verify':True},'reason':''}
+            return httpx.Response(200,json={'id':'resp_test','status':'completed','output':[{
+                'type':'message','role':'assistant','content':[{'type':'output_text','text':json.dumps(result)}]}]})
+        self.ai_handler=handler
+        generated=self.client.post('/generate-tests',json={'repository':'Dahlia00/repopilot','pull_request':1})
+        self.assertEqual(generated.status_code,200,generated.text)
+        artifacts=generated.json()
+        self.assertEqual(artifacts['safe_tests'],1)
+        saved_contract=artifacts['tests'][0]['contract']
+        self.assertFalse(saved_contract['behavior_ambiguous'])
+        self.assertEqual(saved_contract['contract_source'],'existing_tests')
+        self.assertEqual(saved_contract['evidence_path'],test_path)
+        self.assertEqual(saved_contract['cases'],[
+            {'arguments':[100,20],'outcome':'returns','value':80,'exception':None},
+            {'arguments':[100,120],'outcome':'raises','value':None,'exception':'ValueError'}])
+        generated_fix=self.client.post('/generate-fixes',json={'repository':'Dahlia00/repopilot',
+            'pull_request':1,'test_artifacts':artifacts})
+        self.assertEqual(generated_fix.status_code,200,generated_fix.text)
+        fixes=generated_fix.json()
+        selected=fixes['fixes'][0]
+        self.assertEqual(selected['contract'],saved_contract)
+        self.assertTrue(selected['compatibility']['compatible'],selected['compatibility'])
+        saved_test=fixes['test_artifacts']['tests'][0]
+        self.assertEqual(saved_test,artifacts['tests'][0])
+        self.ai_requests.clear()
+        async def execute(root):
+            self.assertEqual((root/'tests'/'test_proposal_0.py').read_text(),saved_test['test_code'])
+            source=(root/'target'/implementation).read_text()
+            self.assertEqual(static_outcome(source,'apply_discount',[100,20]),
+                ('returns',120 if root.name=='before' else 80))
+            return Check(status='FAILED',failed=2,exit_code=1) if root.name=='before' else Check(status='PASSED',passed=2,exit_code=0)
+        with patch('verification.execute_tests',side_effect=execute) as runner, \
+             patch('verification.run_static_analysis',new=AsyncMock(side_effect=[scans(),scans()])):
+            response=self.client.post('/verify-fix',json={'repository':'Dahlia00/repopilot','pull_request':1,
+                'head_sha':artifacts['head_sha'],'finding':selected['finding'],
+                'validated_fix':selected,'validated_test':saved_test})
+        self.assertEqual(response.status_code,200,response.text)
+        result=response.json()
+        self.assertEqual(result['proposal']['contract'],saved_contract)
+        self.assertTrue(result['compatibility']['compatible'],result['compatibility'])
+        self.assertTrue(result['safe_to_apply'],result['verification_summary'])
+        self.assertEqual(runner.call_count,2)
+        self.assertEqual(self.ai_requests,[])
+
     def test_direct_verification_without_test_is_not_approved(self):
         from test_verification import fix
         self.full_sources['sample.py'] = 'def choose(values):\n    return values[0]\n'
