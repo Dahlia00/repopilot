@@ -74,3 +74,54 @@ test('no exact safe test prevents fetch entirely',async()=>{
   for(const state of variants) await assert.rejects(submitVerification(arithmetic,state,'http://localhost:8000',fetcher),/no exact safe saved test/);
   assert.equal(calls,0);
 });
+
+test('Overview guides loaded, reviewed, tested, fix-ready, and blocked states honestly',()=>{
+  const {overviewPresentation}=require('../app/workspace/overview-state.ts');
+  const workspace={agents:null,busy:false};
+  const data={pr:{changed_files:1},review:null,hasReview:false,findings:[],context:[],verification:null,fixes:null,tests:null};
+  assert.equal(overviewPresentation(workspace,data).next.label,'Run review');
+  const reviewed={...data,hasReview:true,findings:[{status:'Pending'}]};
+  assert.equal(overviewPresentation(workspace,reviewed).title,'This PR needs attention');
+  assert.equal(overviewPresentation(workspace,reviewed).next.label,'Generate tests');
+  const tested={...reviewed,tests:{tests:[{execution_safe:true,validation_errors:[]}]}};
+  assert.equal(overviewPresentation(workspace,tested).next.label,'Generate fixes');
+  const fixed={...tested,fixes:{fixes:[arithmetic]}};
+  assert.equal(overviewPresentation(workspace,fixed).next.label,'Review fixes');
+  const blocked={...fixed,verification:{results:[{...arithmetic,proposal:arithmetic,status:'SKIPPED',safe_to_apply:false,compatibility:{compatible:false,behavior_ambiguous:true}}]}};
+  assert.equal(overviewPresentation(workspace,blocked).title,'A human review is needed');
+  assert.equal(overviewPresentation(workspace,blocked).next.label,'View verification');
+  assert.equal(overviewPresentation({...workspace,verifying:true,busy:true},fixed).title,'Checking the proposed fix');
+});
+
+test('Overview renders explicit test/fix states and the PR title without description text',()=>{
+  const {renderToStaticMarkup}=require('react-dom/server');
+  const Overview=require('../app/workspace/overview.tsx').default;
+  const workspace={agents:null,busy:false,analysis:{},reviewing:false};
+  const data={pr:{title:'Demo verification flow',body:'Add demo discount behavior for verification flow',repository:'owner/repo',pull_request:1,changed_files:1,files:[],head_sha:'abcdef0123456789',head_branch:'feature',base_branch:'main',additions:2,deletions:1},review:null,hasReview:true,findings:[],context:[],verification:null,fixes:null,tests:null,counts:{}};
+  let markup=renderToStaticMarkup(Overview({workspace,data,onSelect:()=>{}}));
+  assert.equal((markup.match(/Not ready/g)||[]).length,2);
+  assert.match(markup,/<h3[^>]*>Demo verification flow<\/h3>/);
+  assert.match(markup,/<summary>Pull request description<\/summary><p>Add demo discount behavior for verification flow<\/p>/);
+  assert.ok(!markup.includes('Problems returned by the review'));
+  const ready={...data,tests:{tests:[{execution_safe:true,validation_errors:[]}]},fixes:{fixes:[arithmetic]}};
+  markup=renderToStaticMarkup(Overview({workspace,data:ready,onSelect:()=>{}}));
+  assert.match(markup,/1 safe/);
+  assert.match(markup,/1 ready/);
+});
+
+test('PR title and body stay separate through normalization during and after review',()=>{
+  const {renderToStaticMarkup}=require('react-dom/server');
+  const Overview=require('../app/workspace/overview.tsx').default;
+  const pr={title:'Demo verification flow',body:'Add demo discount behavior for verification flow',repository:'owner/repo',pull_request:3,changed_files:1,files:[],head_sha:'a'.repeat(40),head_branch:'demo',base_branch:'main',additions:2,deletions:1};
+  const reviewed={...pr,reviewed_files:[],ai_findings:[],static_findings:[],scanners:[],skipped_files:[],context_warnings:[],repository_context:[]};
+  for(const complete of [false,true]) {
+    const workspace={analysis:pr,review:complete?reviewed:null,reviewing:!complete,agents:null,generated:null,fixes:null,verification:null,busy:!complete};
+    const data=workspaceData(workspace);
+    assert.equal(data.pr.title,pr.title);
+    const markup=renderToStaticMarkup(Overview({workspace,data,onSelect:()=>{}}));
+    assert.match(markup,/<h3[^>]*>Demo verification flow<\/h3>/);
+    assert.equal(data.pr.body,pr.body);
+    assert.match(markup,/<summary>Pull request description<\/summary><p>Add demo discount behavior for verification flow<\/p>/);
+    assert.ok(!markup.includes(pr.title+pr.body));
+  }
+});

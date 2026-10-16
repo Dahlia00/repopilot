@@ -22,6 +22,7 @@ class PullRequestResponse(BaseModel):
     repository: str
     pull_request: int
     title: str
+    body: str | None = None
     state: Literal['open', 'closed']
     author: str
     base_branch: str
@@ -142,7 +143,7 @@ async def fetch_pull_request(client: httpx.AsyncClient, repository: str, number:
             raise ValueError('Expected PR metadata')
         return PullRequestResponse(
             repository=repository, pull_request=number,
-            title=metadata['title'], state=metadata['state'],
+            title=metadata['title'], body=metadata.get('body'), state=metadata['state'],
             author=metadata['user']['login'],
             base_branch=metadata['base']['ref'], head_branch=metadata['head']['ref'],
             head_sha=metadata['head']['sha'],

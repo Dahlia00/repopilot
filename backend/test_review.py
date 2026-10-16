@@ -405,6 +405,14 @@ class ReviewEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(self.ai_requests, [])
 
+    def test_review_preserves_separate_github_title_and_body(self):
+        with patch.dict(METADATA,{'title':'Demo verification flow',
+            'body':'Add demo discount behavior for verification flow'}):
+            response=self.review()
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()['title'],'Demo verification flow')
+        self.assertEqual(response.json()['body'],'Add demo discount behavior for verification flow')
+
     def test_sdk_structured_review_and_patch_coverage(self):
         response = self.review()
         self.assertEqual(response.status_code, 200, response.text)
