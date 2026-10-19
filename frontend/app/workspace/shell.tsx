@@ -1,5 +1,5 @@
 'use client';
-import {useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 import styles from './product-ui.module.css';
 import type {FormEvent, ReactNode} from 'react';
 import Link from 'next/link';
@@ -27,8 +27,8 @@ function SectionIcon({id}: {id:SectionId}) {
   };
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[id]}/></svg>;
 }
-export function TopBar({workspace, command}: {workspace?: string; command: ReactNode}) {
-  return <header className="app-topbar">
+export function TopBar({workspace, command, navigation, inert=false}: {workspace?: string; command: ReactNode; navigation?:ReactNode; inert?:boolean}) {
+  return <header className="app-topbar" inert={inert}>
     <Link className="app-brand" href="/" aria-label="RepoPilot home">
       <ProductMark /><span>RepoPilot</span>
     </Link>
@@ -37,10 +37,11 @@ export function TopBar({workspace, command}: {workspace?: string; command: React
       {workspace && <span className="workspace-name mono truncate" title={workspace}>{workspace}</span>}
       <span className="safety-status" title="RepoPilot does not modify your repository automatically."><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3M5 10h14v11H5z"/></svg>Read only</span>
     </div>
+    {navigation}
   </header>;
 }
 export function Sidebar({active, onSelect, counts}: {active: SectionId; onSelect: (id: SectionId)=>void; counts: Partial<Record<SectionId,number>>}) {
-  return <aside className="app-sidebar" id="product-navigation"><nav aria-label="Review sections">
+  return <aside className="app-sidebar"><nav aria-label="Review sections">
     {primaryGroups.map(group=><div className="nav-group" key={group.name}>
       {group.name!=='Workspace' && <p className="nav-caption">{group.name}</p>}
       {group.ids.map(id=>sections.find(s=>s.id===id)!).map(s=><button type="button" key={s.id} className={`nav-item ${active===s.id?'selected':''}`} aria-current={active===s.id?'page':undefined} onClick={()=>onSelect(s.id)} title={s.label}>
@@ -52,9 +53,18 @@ export function Sidebar({active, onSelect, counts}: {active: SectionId; onSelect
 }
 export function CommandBar(p: {repository:string; pullRequest:string; busy:boolean; reviewed:boolean; secondary?:boolean; loading:boolean; reviewing:boolean;
   onRepository:(value:string)=>void; onPullRequest:(value:string)=>void; onReview:(event:FormEvent<HTMLFormElement>)=>void}) {
-  return <form className="command-bar" onSubmit={p.onReview} aria-label="Pull request commands">
-    <div className="command-field repository-command"><label htmlFor="repository" className="sr-only">Repository</label>
-      <input id="repository" value={p.repository} placeholder="owner/repository" required autoComplete="off" spellCheck={false}
+  const [editing,setEditing]=useState(false);
+  const repositoryInput=useRef<HTMLInputElement>(null);
+  useEffect(()=>{if(editing)repositoryInput.current?.focus();},[editing]);
+  const compact=p.reviewed&&!editing;
+  return <form className="command-bar" data-mobile-results={compact} onSubmit={event=>{setEditing(false);p.onReview(event);}} aria-label="Pull request commands">
+    <div className={styles.resultsCommands}>
+      <div className={styles.resultsContext} title={`${p.repository} #${p.pullRequest}`}><span>{p.repository}</span><strong>#{p.pullRequest}</strong></div>
+      <button type="submit" className="secondary-button" disabled={p.busy}><span aria-hidden="true">↻</span>{p.loading?'Loading…':p.reviewing?'Reviewing…':'Run again'}</button>
+      <button type="button" className="secondary-button" disabled={p.busy} aria-expanded={editing} aria-controls="review-pr-fields" onClick={()=>setEditing(true)}>Change PR</button>
+    </div>
+    <div id="review-pr-fields" className="command-field repository-command"><label htmlFor="repository" className="sr-only">Repository</label>
+      <input ref={repositoryInput} id="repository" value={p.repository} placeholder="owner/repository" required autoComplete="off" spellCheck={false}
         maxLength={200} disabled={p.busy} onChange={e=>p.onRepository(e.target.value)}/></div>
     <div className="command-field pr-command"><label htmlFor="pr" className="sr-only">Pull request</label>
       <input id="pr" type="number" min="1" step="1" placeholder="PR #" value={p.pullRequest} required disabled={p.busy}
@@ -68,7 +78,36 @@ export function CommandBar(p: {repository:string; pullRequest:string; busy:boole
 export default function AppShell({workspace,active,onSelect,counts,command,children}: {workspace?:string; active:SectionId; onSelect:(id:SectionId)=>void;
   counts:Partial<Record<SectionId,number>>; command:ReactNode; children:ReactNode}) {
   const [navOpen,setNavOpen]=useState(false);
-  return <div className={`app-shell ${styles.app}`} data-nav-open={navOpen}><button className={styles.mobileToggle} type="button" aria-expanded={navOpen} aria-controls="product-navigation" onClick={()=>setNavOpen(!navOpen)}>{navOpen?'Close menu':'Menu'}</button><TopBar workspace={workspace} command={command}/><Sidebar active={active} onSelect={onSelect} counts={counts}/>
-    <main className="app-canvas" id="main-content"><div className="content-frame">{children}</div></main>
+  const trigger=useRef<HTMLButtonElement>(null);
+  const drawer=useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    if(!navOpen) return;
+    const media=window.matchMedia('(max-width: 1024px)');
+    const menuTrigger=trigger.current;
+    const overflow=document.body.style.overflow;
+    document.body.style.overflow='hidden';
+    drawer.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    const onKey=(event:KeyboardEvent)=>{
+      if(event.key==='Escape') {event.preventDefault();setNavOpen(false);return;}
+      if(event.key!=='Tab') return;
+      const controls=[...drawer.current?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],summary,[tabindex="0"]')??[]].filter(node=>node.getClientRects().length);
+      const first=controls[0],last=controls[controls.length-1];
+      if(event.shiftKey && document.activeElement===first) {event.preventDefault();last?.focus();}
+      else if(!event.shiftKey && document.activeElement===last) {event.preventDefault();first?.focus();}
+    };
+    const resized=()=>{if(!media.matches)setNavOpen(false);};
+    document.addEventListener('keydown',onKey);
+    media.addEventListener('change',resized);
+    return ()=>{document.body.style.overflow=overflow;document.removeEventListener('keydown',onKey);media.removeEventListener('change',resized);menuTrigger?.focus();};
+  },[navOpen]);
+  const navigate=(id:SectionId)=>{onSelect(id);setNavOpen(false);};
+  return <div className={`app-shell ${styles.app}`} data-nav-open={navOpen}>
+    <TopBar workspace={workspace} command={command} inert={navOpen} navigation={<button ref={trigger} className={styles.mobileToggle} type="button" aria-label="Open navigation" aria-expanded={navOpen} aria-controls="product-navigation" onClick={()=>setNavOpen(true)}><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>}/>
+    {navOpen && <button className={styles.navBackdrop} type="button" tabIndex={-1} aria-label="Close navigation" onClick={()=>setNavOpen(false)}/>}
+    <div ref={drawer} id="product-navigation" className={styles.navSheet} role={navOpen?'dialog':undefined} aria-modal={navOpen||undefined} aria-label={navOpen?'RepoPilot navigation':undefined}>
+      <button className={styles.drawerClose} type="button" aria-label="Close navigation" onClick={()=>setNavOpen(false)}><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      <Sidebar active={active} onSelect={navigate} counts={counts}/>
+    </div>
+    <main className="app-canvas" id="main-content" inert={navOpen}><div className="content-frame">{children}</div></main>
   </div>;
 }

@@ -81,3 +81,60 @@ p.reason { color:var(--warning); font-size:12px; }
 .resultDetails pre { max-width:100%; overflow:auto; }
 @media(max-width:650px) { .resultRow { padding:18px; } .resultRowHeading { flex-direction:column; gap:8px; } .decisionHeading h2 { font-size:24px; } }
 @media(prefers-reduced-motion:reduce) { .reviewAction { transition:none; } }
+@media(max-width:1024px) {
+  .fixTop { flex-direction:column; }
+  .fixAction { max-width:none; width:100%; }
+  .fixEvidence { grid-template-columns:minmax(0,1fr); }
+  .fixPanel pre,.testPanel pre,.technicalPanel pre { max-width:100%; overflow-x:auto; font-size:12px; }
+  .fixPanel summary,.testPanel summary,.technicalPanel summary,.resultDetails > summary { min-height:44px; align-content:center; }
+  .otherProposals > details > summary { overflow-wrap:anywhere; }
+  .otherProposals > details > summary > span { display:block; }
+  .otherProposals > details > summary > span+span { margin-left:0; margin-top:8px; }
+  .checks { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media(max-width:760px) {
+  .fixAction > button { width:100%; min-height:44px; }
+  .decisionHeading { flex-direction:column; align-items:flex-start; }
+  .decision { padding:22px; }
+  .resultRowHeading { flex-direction:column; }
+  .reviewAction { min-height:44px; }
+}
+@media(max-width:480px) { .checks { grid-template-columns:minmax(0,1fr); } .fixAction { flex-direction:column; align-items:flex-start; } .scanStates { gap:8px; } }
+
+@media(max-width:600px) {
+  .fixPanel,.testPanel,.decision { padding:18px; margin-block:16px; }
+  .fixTop { gap:16px; }
+  .fixTop h3,.testPanel h3 { font-size:18px; line-height:1.4; margin-top:6px; }
+  .fixTop p,.testPanel p { font-size:14px; line-height:1.6; }
+  .fixPanel .label,.label { font-size:11px; }
+  p.findingTitle { font-size:16px; }
+  .fixAction { gap:12px; }
+  .fixAction > div { gap:4px; }
+  .fixAction strong { font-size:22px; }
+  .badge { font-size:11px; padding:3px 7px; }
+  .eligibility { margin-top:14px; padding-top:14px; }
+  .fixEvidence { gap:10px; margin-top:16px; }
+  .fixEvidence > details { padding:14px; }
+  .fixEvidence summary { font-size:14px; }
+  .otherProposals > details > summary { padding:14px 16px; }
+  .decisionHeading { gap:12px; margin-top:8px; }
+  .decisionHeading > svg { width:24px; height:24px; padding:9px; }
+  .decisionHeading h2,.decisionHeading h3 { font-size:27px; line-height:1.2; margin-bottom:8px; }
+  .decisionHeading p { font-size:15px; line-height:1.55; }
+  .resultCounts { gap:8px 16px; margin-top:16px; font-size:13px; }
+  .checks { gap:10px; margin-top:16px; }
+  .check { min-height:0; padding:16px; gap:6px; }
+  .check > svg { width:18px; height:18px; padding:7px; }
+  .check > strong { font-size:14px; }
+  .check small,.scanStates { font-size:12px; line-height:1.5; }
+  .approvalReasons,.technicalPanel { margin-top:16px; padding:16px; font-size:13px; }
+  .approvalReasons h3 { font-size:18px; }
+  .resultGroup { margin-top:20px; }
+  .resultGroup > h3 { font-size:18px; margin-bottom:10px; }
+  .resultRow { padding:16px; margin-top:10px; }
+  .resultRowHeading { gap:6px; }
+  .resultRowHeading h4 { font-size:16px; line-height:1.45; }
+  .resultRow > p { font-size:14px; line-height:1.6; }
+  .resultDetails { margin-top:12px; padding-top:10px; }
+  .fixPanel pre,.testPanel pre,.technicalPanel pre,.resultDetails pre,.fixEvidence pre { font-size:12px; max-width:100%; overflow-x:auto; }
+}

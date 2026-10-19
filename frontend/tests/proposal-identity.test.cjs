@@ -189,10 +189,16 @@ test('Top bar demotes repeat review and never reports idle Ready as PR success',
   const {renderToStaticMarkup}=require('react-dom/server');
   const {CommandBar,TopBar}=require('../app/workspace/shell.tsx');
   const props={repository:'owner/repo',pullRequest:'3',busy:false,reviewed:true,loading:false,reviewing:false,onRepository:()=>{},onPullRequest:()=>{},onReview:()=>{}};
-  const tree=CommandBar(props);
-  const submit=buttons(tree).find(button=>button.props.type==='submit');
-  assert.equal(submit.props.className,'secondary-button');
-  const html=renderToStaticMarkup(tree);
+  const React=require('react');
+  const html=renderToStaticMarkup(React.createElement(CommandBar,props));
+  assert.match(html, /type="submit" class="secondary-button"/);
+  assert.match(html, /data-mobile-results="true"/);
+  assert.match(html, /Run again/);
+  assert.match(html, /Change PR/);
+  assert.match(html, /owner\/repo/);
+  const initial=renderToStaticMarkup(React.createElement(CommandBar,{...props,reviewed:false}));
+  assert.match(initial,/data-mobile-results="false"/);
+  assert.match(initial,/Run review/);
   assert.ok(!html.includes('>Ready<'));
   const trust=renderToStaticMarkup(TopBar({command:null}));
   assert.match(trust,/RepoPilot does not modify your repository automatically/);
@@ -309,4 +315,25 @@ test('Approved summary explains expected baseline failure without hiding after-f
   assert.ok(!failedHtml.includes('Bug reproduced'));
   assert.ok(!failedHtml.includes('Passed after fix'));
   assert.equal(verificationGroup(failed),'failed');
+});
+
+test('Responsive shell and Findings expose accessible mobile navigation controls',()=>{
+  const React=require('react');
+  const {renderToStaticMarkup}=require('react-dom/server');
+  const AppShell=require('../app/workspace/shell.tsx').default;
+  const Findings=require('../app/workspace/findings-cards.tsx').default;
+  const shell=renderToStaticMarkup(React.createElement(AppShell,{active:'overview',onSelect:()=>{},counts:{},command:null},'Workspace'));
+  assert.match(shell,/aria-label="Open navigation"/);
+  assert.doesNotMatch(shell,/>Menu<\/button>/);
+  assert.match(shell,/aria-label="Close navigation"/);
+  assert.doesNotMatch(shell,/Close menu/);
+  assert.match(shell,/<header[^>]*>[\s\S]*aria-label="Open navigation"[\s\S]*<\/header>/);
+  assert.match(shell,/aria-controls="product-navigation"/);
+  assert.match(shell,/aria-expanded="false"/);
+  assert.equal((shell.match(/id="product-navigation"/g)||[]).length,1);
+  const finding={id:'example',severity:'LOW',category:'Bug',file:'very/long/path/example.py',line:1,title:'Check a boundary',explanation:'Existing explanation.',suggested_fix:'Validate the input.',source:'AI',confidence:90,status:'Pending'};
+  const html=renderToStaticMarkup(React.createElement(Findings,{findings:[finding],reviewedFiles:[finding.file],skippedFiles:[]}));
+  assert.match(html,/data-detail-open="false"/);
+  assert.match(html,/Back to findings/);
+  assert.match(html,/aria-label="Selected finding"/);
 });

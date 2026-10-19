@@ -57,3 +57,76 @@
 .filters select:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .code { padding-top:14px; border-top:1px solid var(--border); }
 .code > summary { font-size:12px; }
+.backToList { display:none; }
+@media(max-width:1024px) {
+  .explorer { display:block; }
+  .explorer[data-detail-open='false'] > .list { display:none; }
+  .explorer[data-detail-open='true'] > .selection { display:none; }
+  .selection { max-height:none; overflow:visible; scroll-margin-top:220px; }
+  .list { scroll-margin-top:220px; }
+  .backToList { display:inline-flex; min-height:44px; background:transparent; color:var(--accent); border:1px solid var(--border); margin-bottom:14px; justify-self:start; }
+  .filters button,.filters select { min-height:44px; font-size:13px; }
+  .details summary,.coverage summary,.code summary { min-height:44px; align-content:center; }
+  .explorer .card { padding:20px; min-height:0; }
+  .recommendation { white-space:pre; overflow-x:auto; overflow-wrap:normal; max-width:100%; }
+}
+
+@media(max-width:600px) {
+  .page { gap:16px; }
+  .header h2 { font-size:28px; line-height:1.2; }
+  .header > p { font-size:15px; line-height:1.6; }
+  .counts { margin-top:14px; gap:8px 16px; }
+  .counts > span { font-size:13px; }
+  .filters { gap:6px; }
+  .list { gap:12px; }
+  .card,.explorer .card { padding:16px; }
+  .card h3 { font-size:17px; line-height:1.4; margin:10px 0 6px; }
+  .meta,.location,.footer { font-size:12px; gap:8px; }
+  .location { margin-bottom:12px; }
+  .meaning > span { font-size:13px; }
+  .meaning p { font-size:14px; line-height:1.6; margin:4px 0 12px; }
+  .details { margin-top:12px; padding-top:10px; font-size:13px; }
+  .selection { padding:16px 10px; }
+  .selection h3 { font-size:14px; margin-bottom:10px; }
+  .selection button { min-height:48px; padding:10px; font-size:14px; }
+  .selection code { font-size:12px; }
+  .recommendation { font-size:12px; padding:12px; }
+  .empty { padding:18px; gap:12px; }
+  .empty strong { font-size:17px; }
+  .empty p,.noMatch { font-size:14px; line-height:1.6; }
+}
+
+/* Findings-only phone density; tablet and desktop keep their existing metrics. */
+@media(max-width:600px) {
+  .page { gap:12px; }
+  .header h2 { font-size:23px; margin-bottom:6px; }
+  .header > p { font-size:14px; line-height:1.45; }
+  .counts { margin-top:10px; gap:6px 12px; }
+  .counts > span { font-size:12px; gap:5px; }
+  .page .summaryStrip > div { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0; margin:0; padding:10px 0; border:1px solid var(--border); border-radius:9px; background:var(--panel); }
+  .page .summaryStrip > div > div { display:block; padding:0 10px; border:0; border-radius:0; background:transparent; }
+  .page .summaryStrip > div > div + div { border-left:1px solid var(--border); }
+  .page .summaryStrip > div > div > span { display:none; }
+  .page .summaryStrip > div > div > div { gap:4px; }
+  .page .summaryStrip > div > div > div > span { font-size:11px; line-height:1.25; min-height:28px; }
+  .page .summaryStrip strong { font-size:23px; line-height:1.1; }
+  /* Retain metric descriptions for assistive technology without expanding the strip. */
+  .page .summaryStrip small { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+  .filters { gap:6px; padding-bottom:0; }
+  .filters button,.filters select { min-height:44px; height:44px; font-size:12px; padding:6px 10px; }
+  .filters select { padding-right:26px; }
+  .filterNote { width:100%; font-size:11px; margin:2px 0 0; }
+  .selection { padding:14px; }
+  .selection h3 { font-size:17px; margin:0 0 8px; }
+  .selection h3:not(:first-child) { margin-top:16px; }
+  .selection button { min-height:46px; padding:10px 8px; font-size:14px; gap:8px; line-height:1.4; }
+  .selection code { font-size:13px; line-height:1.4; }
+  .selection button > code + span { flex-shrink:0; padding:2px 6px; border-radius:4px; background:#9caaff12; font-size:11px; }
+  .selection button > :global(.severity-dot) { width:6px; height:6px; flex-shrink:0; }
+  .card,.explorer .card { padding:15px; }
+  .card h3 { font-size:19px; line-height:1.35; margin:10px 0 6px; }
+  .meaning p { font-size:14px; line-height:1.55; }
+  .meta :global(.severity) { font-size:10px; padding:3px 6px; }
+  .meta,.location,.footer { font-size:12px; }
+  .backToList { margin-bottom:10px; font-size:13px; }
+}

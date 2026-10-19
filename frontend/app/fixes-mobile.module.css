@@ -1,0 +1,55 @@
+.explanation { display:none; }
+/* Fixes-only phone styling; preserve the approved tablet and desktop. */
+@media(max-width:600px) {
+  .heading:global(.canvas-heading) { padding:0; min-height:0; background:transparent; border:0; border-radius:0; box-shadow:none; margin-bottom:12px; }
+  .heading:global(.canvas-heading) :global(.section-kicker) { font-size:11px; margin-bottom:4px; }
+  .heading:global(.canvas-heading) h1 { font-size:29px; line-height:1.2; }
+  .workspace > :global(.section-actions) { padding:0 0 10px; margin-bottom:12px; gap:8px; background:transparent; }
+  .workspace > :global(.section-actions) p { font-size:12px; line-height:1.45; margin:0; }
+  .workspace > :global(.section-actions) button { min-height:44px; font-size:13px; padding:8px 12px; }
+  .workspace .page > :global(.section-heading) { margin-bottom:6px; }
+  .workspace .page > :global(.section-heading) h2 { font-size:19px; }
+  .workspace .page > p { font-size:13px; line-height:1.5; margin:8px 0 12px; overflow-wrap:anywhere; }
+  .workspace .metrics > div { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0; margin:12px 0; padding:10px 0; border:1px solid var(--border); border-radius:9px; background:var(--panel); }
+  .workspace .metrics > div > div { display:block; padding:0 10px; border:0; border-radius:0; background:transparent; }
+  .workspace .metrics > div > div + div { border-left:1px solid var(--border); }
+  .workspace .metrics > div > div > span { display:none; }
+  .workspace .metrics > div > div > div { gap:4px; }
+  .workspace .metrics > div > div > div > span { min-height:28px; font-size:11px; line-height:1.25; }
+  .workspace .metrics strong { font-size:24px; line-height:1.1; }
+  .workspace .metrics small { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+  .workspace .proposal { padding:15px; margin:12px 0; }
+  .workspace .proposal > div:first-child { gap:12px; }
+  .workspace .proposal h3 { font-size:19px; line-height:1.35; margin:6px 0 8px; }
+  .workspace .proposal p { font-size:13px; line-height:1.5; margin:6px 0; }
+  .workspace .proposal :global(.finding-location) { font-size:12px; }
+  .workspace .proposal > div:first-child > div:first-child > p:first-child { font-size:11px; margin-top:0; }
+  .workspace .proposal .desktopExplanation { display:none; }
+  .workspace .explanation { display:block; margin-top:8px; font-size:13px; color:var(--muted); }
+  .workspace .explanation > summary { display:block; cursor:pointer; list-style:none; min-height:44px; line-height:1.5; }
+  .explanation > summary::-webkit-details-marker { display:none; }
+  .explanation:not([open]) > summary > span { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+  .explanation > summary::after { content:'Show more'; display:block; color:var(--accent); font-size:12px; margin-top:4px; }
+  .explanation[open] > summary::after { content:'Show less'; }
+  .workspace .action { display:grid; grid-template-columns:auto minmax(0,1fr); gap:10px 12px; align-items:center; }
+  .workspace .action > div { gap:3px; }
+  .workspace .action > div > span:first-child { font-size:11px; }
+  .workspace .action strong { font-size:22px; }
+  .workspace .action > div > span:last-child:not(:first-child) { font-size:10px; padding:3px 6px; }
+  .workspace .action > button { grid-column:1 / -1; width:100%; min-height:44px; padding:10px 12px; font-size:14px; }
+  .workspace .proposal > div:nth-of-type(2) { gap:8px; margin-top:12px; }
+  .workspace .proposal > div:nth-of-type(2) > details { padding:8px 10px; }
+  .workspace .proposal > div:nth-of-type(2) summary { min-height:44px; font-size:13px; line-height:1.4; align-content:center; }
+  .workspace .comparison > div { margin-top:8px; }
+  .workspace .comparison :global([role='group']) { flex-direction:row; gap:4px; }
+  .workspace .comparison button { min-height:44px; font-size:11px; padding:6px; }
+  .workspace .comparison pre { padding:10px; margin-bottom:0; }
+  .workspace .proposal pre { min-width:0; max-width:100%; overflow-x:auto; font-size:12px; }
+  .workspace .proposal > details:not(.explanation) { padding:8px 0; margin-top:10px; }
+  .workspace .proposal > details > summary { padding:0; min-height:44px; font-size:12px; align-content:center; }
+  .workspace .page > div > h3 { font-size:17px; margin:16px 0 10px; }
+  .workspace .page > div > details { margin-top:8px; }
+  .workspace .page > div > details > summary { padding:10px 14px; min-height:56px; font-size:14px; line-height:1.4; }
+  .workspace .page > div > details > summary > span + span { font-size:12px; margin-top:4px; }
+  .workspace .page > :global(.context-skipped) { padding:10px 14px; margin-top:12px; font-size:12px; }
+}
