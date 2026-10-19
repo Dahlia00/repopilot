@@ -1,3 +1,6 @@
+import {countLabel} from './workspace/ui-copy';
+import {MetricStrip, PageIntro} from './workspace/product-primitives';
+import CodeComparison from './workspace/code-comparison';
 import styles from './resolution.module.css';
 import {proposalIdentity} from './workspace/proposal-identity';
 import ContractDetails, { type BehavioralContract, type Compatibility } from './behavior-contract';
@@ -38,75 +41,22 @@ export default function ProposedFixes({ result, onVerify, busy }: {
   onVerify: (fix: FixArtifact) => void;
   busy: boolean;
 }) {
-  return (
-    <section className="ai-results" aria-labelledby="fixes-title">
-      <div className="section-heading">
-        <h2 id="fixes-title">Proposed fixes</h2>
-        <span className="muted small">{result.total_fixes} proposals</span>
-      </div>
-      <div className="combined-summary">
-        <span>Fixes generated: <strong>{result.total_fixes}</strong></span>
-        <span>Eligible for verification: <strong>{result.safe_fixes}</strong></span>
-        <span>Rejected proposals: <strong>{result.rejected_fixes}</strong></span>
-      </div>
-      <p className="muted small">
-        Proposals at commit <code>{result.head_sha.slice(0, 12)}</code>. Eligibility means proposal validation passed;
-        deterministic verification is still required. Nothing is automatically applied. GitHub remains read-only by default.
-      </p>
-      <div className="finding-list">
-        {result.fixes.map((fix) => (
-          <article className="finding" key={proposalIdentity(fix)}>
-            <p className={styles.label}>Related finding</p>
-            <p className={styles.findingTitle}>{fix.finding_title}</p>
-            <p className="finding-location"><code className="truncate" title={fix.file}>{fix.file}</code></p>
-            <p className={styles.label}>Proposed change</p>
-            <h3>{fix.title}</h3>
-            <p>{fix.explanation}</p>
-            <div className="finding-meta"><span>{fix.confidence}% confidence · {fix.sources.join(' + ')}</span></div>
-            <div className={styles.eligibility}>
-              <span className={styles.badge} data-tone={fix.safe_to_verify ? 'ready' : 'attention'}>
-                {fix.safe_to_verify ? 'READY FOR VERIFICATION' : 'NOT ELIGIBLE FOR VERIFICATION'}
-              </span>
-              <p className="muted small">{!fix.compatibility.compatible || fix.compatibility.behavior_ambiguous
-                ? fix.compatibility.reason : fix.safe_to_verify
-                  ? 'Proposal validation passed. Verify this exact change before considering it for application.'
-                  : fix.validation_errors[0] || 'This proposal did not pass validation.'}</p>
-              {!fix.finding && <p className="muted small">Verification is unavailable because the related finding artifact is missing.</p>}
-              <button type="button" disabled={busy || !fix.safe_to_verify || !fix.finding} onClick={() => onVerify(fix)}>
-                Verify this fix
-              </button>
-              <p className="muted small">Uses this proposal and saved test artifacts in temporary isolation. No AI regeneration.</p>
-            </div>
-            <details className="changed-file generated-code">
-              <summary>Compatibility and validation details</summary>
-              <p className="muted small">Finding ID: <code>{fix.finding_id}</code></p>
-              <p>Test/fix compatibility: {fix.compatibility.compatible ? 'Compatible' : 'Incompatible'} · {fix.compatibility.reason}</p>
-              <ContractDetails contract={fix.contract} />
-              {fix.validation_errors.length > 0 && <ul className="error">
-                {fix.validation_errors.map((error, index) => <li key={index}>{error}</li>)}
-              </ul>}
-            </details>
-            <details className="changed-file generated-code">
-              <summary>Before / after</summary>
-              <p className="muted small">Original code</p>
-              <pre className="diff"><code>{fix.original_code}</code></pre>
-              <p className="muted small">Proposed code</p>
-              <pre className="diff"><code>{fix.fixed_code}</code></pre>
-            </details>
-            <details className="changed-file generated-code">
-              <summary>Unified diff</summary>
-              <pre className="diff"><code>{fix.unified_diff || 'No validated diff is available.'}</code></pre>
-            </details>
-          </article>
-        ))}
-      </div>
-      {result.fixes.length === 0 && <p className="empty muted">No justified local fixes were proposed.</p>}
-      {result.skipped_findings.length > 0 && <details className="context-skipped">
-        <summary>{result.skipped_findings.length} issues not selected for fixes</summary>
-        <ul>{result.skipped_findings.map((finding) => <li key={finding.finding_id}>
-          {finding.title} — {finding.reason}
-        </li>)}</ul>
-      </details>}
-    </section>
-  );
+  const ordered=[...result.fixes].sort((a,b)=>Number(b.safe_to_verify)-Number(a.safe_to_verify) || Number(b.compatibility.compatible)-Number(a.compatibility.compatible) || (b.confidence??0)-(a.confidence??0));
+  const recommended=ordered[0];
+  const panel=(fix:FixArtifact,primary:boolean)=><article className={styles.fixPanel} data-recommended={primary} key={proposalIdentity(fix)}>
+    <div className={styles.fixTop}><div><p className={styles.label}>{primary?'RECOMMENDED PROPOSAL':'OTHER PROPOSAL'}</p><h3>{fix.title}</h3><p>Resolves: {fix.finding_title}</p><p className="finding-location"><code>{fix.file}</code></p><p className={styles.shortExplanation}>{fix.explanation.split(/\n\s*\n/)[0]}</p></div>
+      <div className={styles.fixAction}><div><span className="muted small">Confidence</span><strong>{fix.confidence}%</strong></div><div><span className="muted small">Verification eligibility</span><span className={styles.badge} data-tone={fix.safe_to_verify?'ready':'attention'}>{fix.safe_to_verify?'READY FOR VERIFICATION':'NOT ELIGIBLE FOR VERIFICATION'}</span></div><button type="button" className={primary?undefined:'secondary-button'} disabled={busy||!fix.safe_to_verify||!fix.finding} onClick={()=>onVerify(fix)}>Verify this fix <span aria-hidden="true">→</span></button></div>
+    </div>
+    <p className="muted small">{fix.compatibility.compatible&&!fix.compatibility.behavior_ambiguous?'The saved test and proposed behavior agree. Deterministic verification is still required.':fix.compatibility.reason}</p>
+    {!fix.finding && <p className="muted small">The related finding is missing; verification is unavailable.</p>}
+    <div className={styles.fixEvidence}><details><summary>Why this change · expected behavior</summary><ContractDetails contract={fix.contract}/><p className="muted small">Sources: {fix.sources.join(' + ')}</p></details><details open={primary}><summary>Before / after</summary><CodeComparison before={fix.original_code} after={fix.fixed_code}/></details><details><summary>Unified diff</summary><pre className="diff"><code>{fix.unified_diff||'No validated diff available.'}</code></pre></details></div>
+    <details className="changed-file generated-code"><summary>Compatibility and validation details</summary><p>Finding ID: <code>{fix.finding_id}</code></p><p>Test/fix compatibility: {fix.compatibility.compatible?'Compatible':'Incompatible'} · {fix.compatibility.reason}</p><p>{fix.explanation}</p>{fix.validation_errors.length>0 && <ul className="error">{fix.validation_errors.map((error,index)=><li key={index}>{error}</li>)}</ul>}</details>
+  </article>;
+  return <section className="ai-results" aria-labelledby="fixes-title"><div className="section-heading"><h2 id="fixes-title">Proposed changes</h2></div><PageIntro>Review a focused change for each issue, then verify the exact proposal against its saved tests. Nothing is applied automatically.</PageIntro>
+    <MetricStrip items={[{label:'Total proposals',value:result.total_fixes,detail:'Local changes suggested by review',icon:'fix'},{label:'Eligible for verification',value:result.safe_fixes,detail:'Ready to run deterministic checks',icon:'test'},{label:'Rejected proposals',value:result.rejected_fixes,detail:'Require further review',icon:'issue',tone:result.rejected_fixes?'attention':undefined}]}/>
+    <p className="muted small">Snapshot <code>{result.head_sha.slice(0,12)}</code> · GitHub remains read-only by default.</p>
+    {recommended?panel(recommended,true):<p className="section-empty">No justified local fixes were proposed.</p>}
+    {ordered.length>1 && <div className={styles.otherProposals}><h3>Other proposals <span className="tag">{ordered.length-1}</span></h3>{ordered.slice(1).map(fix=><details key={proposalIdentity(fix)}><summary><span>{fix.title}</span><span className="muted small">{fix.confidence}% · {fix.safe_to_verify?'Ready to verify':'Needs review'}</span></summary>{panel(fix,false)}</details>)}</div>}
+    {result.skipped_findings.length>0 && <details className="context-skipped"><summary>{countLabel(result.skipped_findings.length,'issue')} not selected for fixes</summary><ul>{result.skipped_findings.map((f,i)=><li key={`${f.finding_id}:${i}`}>{f.title} — {f.reason}</li>)}</ul></details>}
+  </section>;
 }

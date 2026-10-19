@@ -24,7 +24,7 @@ export default function CtaSection() {
             and proves every proposed fix before anything reaches main.
           </RevealItem>
           <RevealItem className={styles.ctaActions}>
-            <ActionLink href="/app" size="large">Get started<Icon name="arrow" size={17}/></ActionLink>
+            <ActionLink href="/app" size="large">Open RepoPilot<Icon name="arrow" size={17}/></ActionLink>
             <ActionLink href={repositoryUrl} variant="ghost" size="large"><Icon name="github" size={17}/>Star on GitHub</ActionLink>
           </RevealItem>
           <RevealItem><PipelineRail/></RevealItem>

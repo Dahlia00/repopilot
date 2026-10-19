@@ -1,3 +1,6 @@
+'use client';
+import {useState} from 'react';
+import styles from './product-ui.module.css';
 import type {FormEvent, ReactNode} from 'react';
 import Link from 'next/link';
 import ProductMark from '../../components/shared/product-mark';
@@ -7,7 +10,8 @@ export const sections: {id: SectionId; label: string; group: string}[] = [
   {id:'findings',label:'Findings',group:'Review'}, {id:'static',label:'Static analysis',group:'Review'}, {id:'security',label:'Security',group:'Review'}, {id:'agents',label:'Agents',group:'Review'},
   {id:'tests',label:'Tests',group:'Resolution'}, {id:'fixes',label:'Fixes',group:'Resolution'}, {id:'verification',label:'Verification',group:'Resolution'},
 ];
-const groups=[...new Set(sections.map(s=>s.group))];
+const primaryGroups=[{name:'Workspace',ids:['overview']},{name:'Review',ids:['findings']},{name:'Resolve',ids:['tests','fixes','verification']}];
+const advancedIds=['files','context','static','security','agents'];
 function SectionIcon({id}: {id:SectionId}) {
   const paths:Record<SectionId,string>={
     overview:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
@@ -25,29 +29,28 @@ function SectionIcon({id}: {id:SectionId}) {
 }
 export function TopBar({workspace, command}: {workspace?: string; command: ReactNode}) {
   return <header className="app-topbar">
-    <Link className="app-brand" href="/app" aria-label="RepoPilot application">
+    <Link className="app-brand" href="/" aria-label="RepoPilot home">
       <ProductMark /><span>RepoPilot</span>
     </Link>
     {command}
     <div className="chrome-meta">
       {workspace && <span className="workspace-name mono truncate" title={workspace}>{workspace}</span>}
-      <span className="safety-status" title="This interface only reviews and previews. Nothing is applied to GitHub.">Read only</span>
+      <span className="safety-status" title="RepoPilot does not modify your repository automatically."><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3M5 10h14v11H5z"/></svg>Read only</span>
     </div>
   </header>;
 }
 export function Sidebar({active, onSelect, counts}: {active: SectionId; onSelect: (id: SectionId)=>void; counts: Partial<Record<SectionId,number>>}) {
-  return <aside className="app-sidebar"><nav aria-label="Review sections">
-    {groups.map(group=><div className="nav-group" key={group}>
-      <p className="nav-caption">{group}</p>
-      {sections.filter(s=>s.group===group).map(s=><button type="button" key={s.id} className={`nav-item ${active===s.id?'selected':''}`}
-        aria-label={s.label} aria-current={active===s.id?'page':undefined} onClick={()=>onSelect(s.id)} title={s.label}>
-        <span className="nav-symbol" aria-hidden="true"><SectionIcon id={s.id}/></span><span className="nav-label">{s.label}</span>
-        {counts[s.id]!==undefined && <span className="nav-count mono">{counts[s.id]}</span>}
+  return <aside className="app-sidebar" id="product-navigation"><nav aria-label="Review sections">
+    {primaryGroups.map(group=><div className="nav-group" key={group.name}>
+      {group.name!=='Workspace' && <p className="nav-caption">{group.name}</p>}
+      {group.ids.map(id=>sections.find(s=>s.id===id)!).map(s=><button type="button" key={s.id} className={`nav-item ${active===s.id?'selected':''}`} aria-current={active===s.id?'page':undefined} onClick={()=>onSelect(s.id)} title={s.label}>
+        <span className="nav-symbol"><SectionIcon id={s.id}/></span><span className="nav-label">{s.label}</span>{counts[s.id]!==undefined && <span className="nav-count mono">{counts[s.id]}</span>}
       </button>)}
     </div>)}
+    <details className={styles.more} open={advancedIds.includes(active)||undefined}><summary>More · Advanced tools</summary>{advancedIds.map(id=>sections.find(s=>s.id===id)!).map(s=><button type="button" key={s.id} className={`nav-item ${active===s.id?'selected':''}`} aria-current={active===s.id?'page':undefined} onClick={()=>onSelect(s.id)}><span className="nav-symbol"><SectionIcon id={s.id}/></span><span className="nav-label">{s.label}</span>{counts[s.id]!==undefined && <span className="nav-count mono">{counts[s.id]}</span>}</button>)}</details>
   </nav><p className="sidebar-note">Review evidence.<br/>Keep changes under your control.</p></aside>;
 }
-export function CommandBar(p: {repository:string; pullRequest:string; busy:boolean; reviewed:boolean; loading:boolean; reviewing:boolean;
+export function CommandBar(p: {repository:string; pullRequest:string; busy:boolean; reviewed:boolean; secondary?:boolean; loading:boolean; reviewing:boolean;
   onRepository:(value:string)=>void; onPullRequest:(value:string)=>void; onReview:(event:FormEvent<HTMLFormElement>)=>void}) {
   return <form className="command-bar" onSubmit={p.onReview} aria-label="Pull request commands">
     <div className="command-field repository-command"><label htmlFor="repository" className="sr-only">Repository</label>
@@ -57,13 +60,15 @@ export function CommandBar(p: {repository:string; pullRequest:string; busy:boole
       <input id="pr" type="number" min="1" step="1" placeholder="PR #" value={p.pullRequest} required disabled={p.busy}
         onChange={e=>p.onPullRequest(e.target.value)}/></div>
     <div className="command-actions">
-      <button type="submit" disabled={p.busy}>{p.loading?'Loading PR…':p.reviewing?'Reviewing…':p.reviewed?'Run review again':'Run review'}<span aria-hidden="true">↗</span></button>
+      <button type="submit" className={p.reviewed||p.secondary?'secondary-button':undefined} disabled={p.busy}>{p.loading?'Loading PR…':p.reviewing?'Reviewing…':p.reviewed?'Run review again':'Run review'}<span aria-hidden="true">↗</span></button>
     </div>
+    {p.busy && <span className={styles.runStatus} role="status">{p.loading?'Loading PR':p.reviewing?'Reviewing':'Working'}</span>}
   </form>;
 }
 export default function AppShell({workspace,active,onSelect,counts,command,children}: {workspace?:string; active:SectionId; onSelect:(id:SectionId)=>void;
   counts:Partial<Record<SectionId,number>>; command:ReactNode; children:ReactNode}) {
-  return <div className="app-shell"><TopBar workspace={workspace} command={command}/><Sidebar active={active} onSelect={onSelect} counts={counts}/>
+  const [navOpen,setNavOpen]=useState(false);
+  return <div className={`app-shell ${styles.app}`} data-nav-open={navOpen}><button className={styles.mobileToggle} type="button" aria-expanded={navOpen} aria-controls="product-navigation" onClick={()=>setNavOpen(!navOpen)}>{navOpen?'Close menu':'Menu'}</button><TopBar workspace={workspace} command={command}/><Sidebar active={active} onSelect={onSelect} counts={counts}/>
     <main className="app-canvas" id="main-content"><div className="content-frame">{children}</div></main>
   </div>;
 }

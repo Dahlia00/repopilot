@@ -1,3 +1,4 @@
+import {countLabel} from './workspace/ui-copy';
 export type StaticFinding = {
   source: 'bandit' | 'semgrep';
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
@@ -93,7 +94,7 @@ export default function StaticAnalysis({
       )}
       {skippedFiles.length > 0 && (
         <details className="context-skipped">
-          <summary>{skippedFiles.length} files excluded from static analysis</summary>
+          <summary>{countLabel(skippedFiles.length,'file')} excluded from static analysis</summary>
           <ul>
             {skippedFiles.map((file) => (
               <li key={file.path}>

@@ -1,3 +1,6 @@
+import {verificationGroups,verificationGroup,verificationReason,type VerificationItem} from './workspace/verification-presentation';
+import {countLabel} from './workspace/ui-copy';
+import {ProductIcon} from './workspace/product-primitives';
 import styles from './resolution.module.css';
 import type {FixArtifact} from './proposed-fixes';
 import {verificationIdentity} from './workspace/proposal-identity';
@@ -55,9 +58,9 @@ function TestResult({ label, check }: { label: string; check: Check }) {
   </div>;
 }
 function ScanSummary({name,before,after}:{name:string;before:Check;after:Check}) {
-  return <div className={styles.check}><strong>{name}</strong>
+  return <div className={styles.check}><ProductIcon kind={name==='Bandit'?'verify':'code'}/><strong>{name}</strong>
     <span className={styles.scanStates}><span>Before {badge(before.status)}</span><span aria-hidden="true">→</span><span>After {badge(after.status)}</span></span>
-    <span className="mono muted small">{before.findings.length} findings → {after.findings.length} findings</span>
+    <span className="mono muted small">{countLabel(before.findings.length,'finding')} → {countLabel(after.findings.length,'finding')}</span>
     {(before.status!=='PASSED' || after.status!=='PASSED') && <small className="muted">Counts may reflect incomplete or skipped scans; see tool details.</small>}
   </div>;
 }
@@ -72,52 +75,50 @@ function Scans({ name, before, after }: { name: string; before: Check; after: Ch
     })}
   </div>;
 }
-export default function Verification({ result }: { result: FixVerification }) {
-  return <section className="ai-results" aria-labelledby="verification-title">
-    <div className="section-heading"><h2 id="verification-title">Verification results</h2></div>
-    <div className="combined-summary">
-      <span>Fixes verified: <strong>{result.fixes_verified}</strong></span>
-      <span>Passed: <strong>{result.passed}</strong></span>
-      <span>Failed: <strong>{result.failed}</strong></span>
-      <span>Skipped: <strong>{result.skipped}</strong></span>
+export function CheckSummary({fix}:{fix:VerificationItem}) {
+  const reproduced=verificationGroup(fix)==='approved' && fix.generated_test.status==='FAILED' && fix.regression_tests.status==='PASSED';
+  return <>
+    {reproduced && <p className={styles.scanStates} aria-label="Regression verification sequence"><span>Before fix: bug reproduced</span><span aria-hidden="true">→</span><span>Proposed fix</span><span aria-hidden="true">→</span><span>After fix: passed ✓</span></p>}
+    <div className={styles.checks} aria-label="Verification check summary">
+      {([['Syntax',fix.syntax_check],['Selected test',fix.generated_test],['Regression tests',fix.regression_tests]] as const).map(([label,check])=><div className={styles.check} key={label}>
+        <ProductIcon kind={label==='Syntax'?'code':'test'}/><strong>{label}</strong>
+        {label==='Selected test' && reproduced?<span className={styles.badge} data-tone="ready">Bug reproduced</span>:label==='Regression tests' && check.status==='PASSED'?<span className={styles.badge} data-tone="passed">Passed after fix</span>:label==='Regression tests' && check.status==='FAILED'?<span className={styles.badge} data-tone="attention">FAILED</span>:badge(check.status)}
+        <small className="muted">{label==='Selected test'?reproduced?'Failed on the original code as expected.':'Before fix · original code':label==='Regression tests'?'After fix · proposed code':'Fixed file'}</small>
+      </div>)}
+      <ScanSummary name="Bandit" before={fix.bandit_before} after={fix.bandit_after}/><ScanSummary name="Semgrep" before={fix.semgrep_before} after={fix.semgrep_after}/>
     </div>
-    <p className="muted small">Artifact snapshot: <code>{result.head_sha.slice(0,12)}</code>. Verification covers each exact proposal independently in temporary isolation. Nothing is automatically applied. GitHub remains read-only by default.</p>
-    <div className="finding-list">{result.results.map((fix) => {
-      const approved=fix.status==='PASSED' && fix.safe_to_apply && fix.compatibility.compatible && !fix.compatibility.behavior_ambiguous;
-      return <article className="finding" key={verificationIdentity(fix)}>
-        <div className={styles.decision} data-approved={approved}>
-          <span className={styles.badge} data-tone={approved?'passed':'attention'}>{approved?'VERIFICATION APPROVED':'HUMAN REVIEW REQUIRED'}</span>
-          <h3>{fix.title}</h3>
-          <p className="finding-location"><code className="truncate" title={fix.file}>{fix.file}</code></p>
-          <p className={styles.decisionText}>Verification decision: <strong>{approved?'APPROVED':'HUMAN REVIEW REQUIRED'}</strong></p>
-          <p>{fix.verification_summary}</p>
-          {(!fix.compatibility.compatible || fix.compatibility.behavior_ambiguous) && <p className={styles.reason}>{fix.compatibility.reason}</p>}
-          {approved && <p className="muted small">This exact proposal passed the available deterministic verification checks. Approval does not apply to other changes.</p>}
-        </div>
-        <div className={styles.checks} aria-label="Verification check summary">
-          {([['Syntax',fix.syntax_check],['Generated test',fix.generated_test],['Regression tests',fix.regression_tests]] as const).map(([label,check])=><div className={styles.check} key={label}>
-            <strong>{label}</strong>{badge(check.status)}<small className="muted">{label==='Generated test'?'Before fix':label==='Regression tests'?'After fix':'Fixed file'}</small>
-          </div>)}
-          <ScanSummary name="Bandit" before={fix.bandit_before} after={fix.bandit_after}/>
-          <ScanSummary name="Semgrep" before={fix.semgrep_before} after={fix.semgrep_after}/>
-        </div>
-        <details className="changed-file generated-code">
-          <summary>Compatibility and exact proposal</summary>
-          <p className="muted small">Finding ID: <code>{fix.finding_id}</code> · Overall result: {badge(fix.status)}</p>
-          <p>Compatibility: {fix.compatibility.compatible ? 'Compatible' : 'Incompatible'} · {fix.compatibility.reason}</p>
-          <p>Behavior ambiguous: {fix.compatibility.behavior_ambiguous?'Yes':'No'}</p>
-          {fix.proposal?<><p className={styles.label}>Exact proposal checked by this verification</p><pre className="diff"><code>{fix.proposal.unified_diff || fix.proposal.fixed_code}</code></pre></>:<p className="muted small">No verified proposal artifact returned.</p>}
-        </details>
-        <details className="changed-file generated-code">
-          <summary>Detailed check results and captured output</summary>
-          <TestResult label="Syntax" check={fix.syntax_check}/>
-          <TestResult label="Generated test · Before fix" check={fix.generated_test}/>
-          <TestResult label="Regression tests · After fix" check={fix.regression_tests}/>
-          <Scans name="Bandit" before={fix.bandit_before} after={fix.bandit_after}/>
-          <Scans name="Semgrep" before={fix.semgrep_before} after={fix.semgrep_after}/>
-        </details>
-      </article>;
-    })}</div>
-    {result.results.length === 0 && <p className="empty muted">No fix proposals were available to verify.</p>}
+  </>;
+}
+function ResultDetails({fix}:{fix:VerificationItem}) {
+  return <>
+    <CheckSummary fix={fix}/>
+    <h4>Verification summary · original details</h4><p>{fix.verification_summary}</p>
+    <p>Finding ID: <code>{fix.finding_id}</code> · Overall result: {badge(fix.status)}</p>
+    <p>Compatibility: {fix.compatibility.compatible?'Compatible':'Incompatible'} · {fix.compatibility.reason}</p>
+    <p>Behavior ambiguous: {fix.compatibility.behavior_ambiguous?'Yes':'No'}</p>
+    <details className={styles.technicalPanel}><summary>Exact proposal and saved contract</summary>{fix.proposal?<><pre className="diff"><code>{fix.proposal.unified_diff || fix.proposal.fixed_code}</code></pre><pre className="diff"><code>{JSON.stringify(fix.proposal.contract,null,2)}</code></pre></>:<p>No verified proposal artifact returned.</p>}</details>
+    <details className={styles.technicalPanel}><summary>Detailed check results and captured output</summary><TestResult label="Syntax" check={fix.syntax_check}/><TestResult label="Selected test · Before fix" check={fix.generated_test}/><TestResult label="Regression tests · After fix" check={fix.regression_tests}/><Scans name="Bandit" before={fix.bandit_before} after={fix.bandit_after}/><Scans name="Semgrep" before={fix.semgrep_before} after={fix.semgrep_after}/></details>
+  </>;
+}
+export default function Verification({result}:{result:FixVerification}) {
+  const groups=verificationGroups(result.results);
+  const allApproved=result.results.length>0 && groups.approved.length===result.results.length;
+  const unresolved=groups.needsReview.length+groups.failed.length;
+  const failedOnly=groups.failed.length>0 && !groups.needsReview.length && !groups.approved.length;
+  const allChecksComplete=allApproved && result.results.every(fix=>[fix.syntax_check,fix.regression_tests,fix.bandit_before,fix.bandit_after,fix.semgrep_before,fix.semgrep_after].every(check=>check.status==='PASSED'));
+  const sections=[{id:'needs-review',label:'Needs review',results:groups.needsReview},{id:'failed',label:'Failed',results:groups.failed},{id:'approved',label:'Approved',results:groups.approved}];
+  return <section className="ai-results" aria-labelledby="verification-title">
+    <header className={styles.decision} data-approved={allApproved}>
+      <span className={styles.badge} data-tone={allApproved?'passed':'attention'}>{allApproved?'VERIFICATION APPROVED':failedOnly?'FAILED':'NEEDS REVIEW'}</span>
+      <div className={styles.decisionHeading}><ProductIcon kind={allApproved?'verify':'issue'}/><div><h2 id="verification-title">{allApproved?'Verification approved':failedOnly?'Verification failed':'Needs review'}</h2><p>{allApproved?allChecksComplete?'All checks passed for the approved proposals.':'Required verification checks passed. Review any unavailable optional checks in the details.':'RepoPilot approved what it could verify. Review the remaining results and their reasons before moving forward.'}</p></div></div>
+      <div className={styles.resultCounts} aria-label="Verification decisions"><span>Approved: <strong>{groups.approved.length}</strong></span><span>Needs review: <strong>{groups.needsReview.length}</strong></span>{groups.failed.length>0 && <span>Failed: <strong>{groups.failed.length}</strong></span>}</div>
+      <p className="muted small">{countLabel(groups.approved.length,'fix')} approved{groups.needsReview.length?` · ${groups.needsReview.length} ${groups.needsReview.length===1?'item needs':'items need'} review${groups.failed.length?` · ${countLabel(groups.failed.length,'item')} failed`:''}`:groups.failed.length?` · ${countLabel(groups.failed.length,'item')} failed`:''}. Nothing is applied automatically; approval covers only the exact checked proposals.</p>
+      {unresolved>0 && <a className={styles.reviewAction} href="#verification-unresolved">Review unresolved results <span aria-hidden="true">↓</span></a>}
+    </header>
+    {allApproved && result.results.length===1 && <CheckSummary fix={result.results[0]}/>}
+    {unresolved>0 && <div id="verification-unresolved" className={styles.unresolvedTarget} tabIndex={-1}><h2 className="sr-only">Unresolved verification results</h2></div>}
+    {sections.filter(group=>group.results.length>0).map(group=><section className={styles.resultGroup} key={group.id} aria-labelledby={`verification-${group.id}`}><h3 id={`verification-${group.id}`}>{group.label} <span className="muted small">({group.results.length})</span></h3>{group.results.map(fix=><article className={styles.resultRow} data-outcome={verificationGroup(fix)} key={verificationIdentity(fix)}><div className={styles.resultRowHeading}><h4>{fix.title}</h4><span className={styles.badge} data-tone={group.id==='approved'?'passed':group.id==='failed'?'failed':'attention'}>{group.label}</span></div><p className="finding-location"><code>{fix.file}</code></p><p>{verificationReason(fix)}</p><details className={styles.resultDetails}><summary>View details</summary><ResultDetails fix={fix}/></details></article>)}</section>)}
+    {!result.results.length && <p className="empty muted">No fix proposals were available to verify. Choose a validated fix to begin.</p>}
+    <details className={styles.technicalPanel}><summary>Verification run · snapshot and original totals</summary><p><code>{result.head_sha.slice(0,12)}</code> · {countLabel(result.fixes_verified,'fix')} verified · Raw status totals: {result.passed} PASSED / {result.failed} FAILED / {result.skipped} SKIPPED</p><p>Verification uses temporary isolation. GitHub remains read-only by default.</p></details>
   </section>;
 }
