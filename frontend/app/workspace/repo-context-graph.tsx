@@ -1,3 +1,4 @@
+import {countLabel} from './ui-copy';
 import {useMemo, useRef, useState} from 'react';
 import type {ContextFileMetadata} from '../repository-context';
 const schematic=[[150,110],[320,70],[220,210],[470,90],[430,230],[600,150],[560,250]];
@@ -45,7 +46,7 @@ export default function RepoContextGraph({files,context,loaded}: {files:string[]
   const dist=(a:{x:number;y:number},b:{x:number;y:number})=>Math.hypot(b.x-a.x,b.y-a.y);
   const nodeDelay=(path:string)=>Math.min(points.findIndex(p=>p.path===path)*28,420);
   return <section className="context-graph" aria-labelledby="graph-heading">
-    <div className="section-heading"><h2 id="graph-heading">Repository context</h2>{loaded && <span className="mono muted small">{paths.length} files{clusters.length>1?` · ${clusters.length} modules`:''}</span>}</div>
+    <div className="section-heading"><h2 id="graph-heading">Repository context</h2>{loaded && <span className="mono muted small">{countLabel(paths.length,'file')}{clusters.length>1?` · ${clusters.length} modules`:''}</span>}</div>
     <svg ref={svgRef} className="graph-stage" viewBox="0 0 740 340" role="img" onMouseMove={loaded?onMove:undefined} onMouseLeave={()=>setTilt({x:0,y:0})}
       style={{transform:`perspective(1400px) rotateX(${4+tilt.x}deg) rotateY(${tilt.y}deg)`}}
       aria-label={loaded?'Actual changed files and selected context relationships':'Schematic illustration; no repository data loaded'}>
@@ -78,6 +79,6 @@ export default function RepoContextGraph({files,context,loaded}: {files:string[]
       </g>}
     </svg>
     <p className="muted small">{!loaded?'Schematic · Repository context builds here once a review runs.':context.length?'Links show actual context selection relationships, not a complete dependency graph.':'Changed file metadata loaded. Selected context appears after a review.'}
-      {paths.length>visible.length && ` Showing ${visible.length} of ${paths.length} files; full paths remain available in Changed files and Repository context.`}</p>
+      {paths.length>visible.length && ` Showing ${visible.length} of ${countLabel(paths.length,'file')}; full paths remain available in Changed files and Repository context.`}</p>
   </section>;
 }

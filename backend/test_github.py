@@ -54,11 +54,22 @@ class GitHubEndpointTests(unittest.TestCase):
         self.assertEqual(self.client.get('/health').json(), {'status': 'ok', 'service': 'RepoPilot API'})
         self.assertEqual(self.requests, [])
 
+    def test_github_title_and_body_remain_separate(self):
+        title='Demo verification flow'
+        body='Add demo discount behavior for verification flow'
+        original=self.success
+        self.handler=lambda request: httpx.Response(200,json={**METADATA,'title':title,'body':body}) if request.url.path==PR_PATH else original(request)
+        response=self.analyze()
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()['title'],title)
+        self.assertEqual(response.json()['body'],body)
+        self.assertNotEqual(response.json()['title'],title+body)
+
     def test_real_response_shape_and_optional_patch(self):
         response = self.analyze()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {
-            'repository': 'Dahlia00/repopilot', 'pull_request': 1, 'title': 'Add sample',
+            'repository': 'Dahlia00/repopilot', 'pull_request': 1, 'title': 'Add sample', 'body': None,
             'state': 'open', 'author': 'Dahlia00', 'base_branch': 'main', 'head_branch': 'sample',
             'changed_files': 2, 'additions': 8, 'deletions': 1,
             'head_sha': 'a' * 40, 'head_repository': 'Dahlia00/repopilot',

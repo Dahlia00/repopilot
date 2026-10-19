@@ -17,7 +17,7 @@ export type Compatibility = {
   behavior_ambiguous: boolean;
 };
 export default function ContractDetails({ contract }: { contract: BehavioralContract | null }) {
-  if (!contract) return <p className="muted small">Desired behavior is not established. Human review is required.</p>;
+  if (!contract) return <p className="muted small">Expected behavior could not be confirmed. More repository evidence is needed.</p>;
   return <div className="fix">
     <span>BEHAVIORAL CONTRACT · {contract.behavior_ambiguous ? 'AMBIGUOUS' : 'EVIDENCE PROVIDED'}</span>
     <p>Current: {contract.current_behavior}</p>

@@ -1,33 +1,42 @@
+import {countLabel} from './ui-copy';
 import type {ReviewWorkspace} from './use-review-workspace';
 import type {WorkspaceData} from './data';
 import type {SectionId} from './types';
 import PipelineFlow from './pipeline-flow';
+import {ReviewIllustration} from './product-primitives';
 import RepoContextGraph from './repo-context-graph';
-import ResolutionSummary from './resolution-summary';
-import {overviewState} from './overview-state';
+import {overviewPresentation} from './overview-state';
 import styles from './overview.module.css';
 const rank={CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3};
+function SummaryIcon({kind}:{kind:'issues'|'tests'|'fixes'|'verify'}) {
+  const paths={issues:'M12 8v5m0 3h.01M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18',tests:'M8 3h8m-6 0v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3M8 15h8',fixes:'m5 19 14-14M12 5h7v7M5 11V5h6',verify:'m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3m-4 9 3 3 5-6'};
+  return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[kind]}/></svg>;
+}
 export default function Overview({workspace:w,data:d,onSelect}: {workspace:ReviewWorkspace;data:WorkspaceData;previewCount?:number;onSelect:(id:SectionId)=>void}) {
-  if(!d.pr) return <div className={styles.empty}><p className={styles.eyebrow}>NEW REVIEW</p><h1>Review a pull request</h1><p>Load a GitHub pull request to inspect its changes, review issues, and verify proposed fixes.</p><span className="muted small">Start with the repository and PR number in the command bar above.</span></div>;
-  const {status,safeResults,actionable}=overviewState(w,d);
-  const top=[...actionable].sort((a,b)=>rank[a.severity]-rank[b.severity]).slice(0,5);
-  const metrics=[
-    [d.review?.reviewed_files.length,'files reviewed'],[d.context.length,'context files'],
-    [d.findings.length,'findings'],[d.counts.static,'static findings'],
-  ].filter(([value])=>typeof value==='number' && value>0);
+  if(!d.pr) return <div className={styles.empty}><span className={styles.heroIcon}><SummaryIcon kind="verify"/></span><p className={styles.eyebrow}>NEW REVIEW</p><h1>{w.loading?'Loading your pull request':'Review with confidence'}</h1><p>Enter a GitHub repository and pull request number above. RepoPilot will review the changes and help you check proposed fixes.</p><span className="muted small">Your repository stays under your control. Nothing is applied automatically.</span></div>;
+  const view=overviewPresentation(w,d);
+  const top=[...view.actionable].sort((a,b)=>rank[a.severity]-rank[b.severity]).slice(0,3);
+  const next=()=>{
+    onSelect(view.next.section);
+    if(view.next.action==='review') void w.analyzeWithAI();
+    if(view.next.action==='tests') void w.generateTestProposals();
+    if(view.next.action==='fixes') void w.generateFixProposals();
+  };
+  const cards=[
+    {kind:'issues' as const,label:'Issues',value:d.hasReview?String(d.findings.length):'—',detail:d.hasReview?'Problems found in this pull request':'Available after review',tone:view.actionable.length?'attention':'idle',section:'findings' as SectionId},
+    {kind:'tests' as const,label:'Tests',value:view.safeTests?`${view.safeTests} safe`:'Not ready',detail:view.safeTests?'Safety-checked tests, ready to run in verification':'Confirm how the code should behave',tone:view.safeTests?'complete':w.generationError||d.tests?.rejected_tests?'attention':'idle',section:'tests' as SectionId},
+    {kind:'fixes' as const,label:'Fixes',value:view.readyFixes?`${view.readyFixes} ready`:'Not ready',detail:view.readyFixes?'Proposed changes ready to verify':'Prepare a change before verification',tone:view.readyFixes?'complete':d.fixes?.rejected_fixes?'attention':'idle',section:'fixes' as SectionId},
+    {kind:'verify' as const,label:'Verification',value:w.verifying?'Checking…':d.verification?`${view.approved} approved`:'Not checked',detail:d.verification?view.needsReview||view.failed?[view.needsReview?`${view.needsReview} ${view.needsReview===1?'needs':'need'} review`:null,view.failed?`${view.failed} failed`:null].filter(Boolean).join(' · '):view.approved?'Fix verified against available checks':'No fix has been approved yet':'Tests and checks before application',tone:w.verifying?'running':d.verification&&d.verification.results.length>view.approved?'attention':view.approved?'complete':d.verification?'attention':'idle',section:'verification' as SectionId},
+  ];
   return <div className={styles.overview}>
-    <header className={styles.header}><div><p className={styles.metadata}><span>{d.pr.repository}</span><span>#{d.pr.pull_request}</span></p><h1>{d.pr.title}</h1>
-      <div className={styles.metadata}>{d.pr.head_branch && d.pr.base_branch && <span>{d.pr.head_branch} → {d.pr.base_branch}</span>}<span>{d.pr.changed_files} changed files</span><span><b className={styles.additions}>+{d.pr.additions}</b> / <b className={styles.deletions}>−{d.pr.deletions}</b></span></div></div>
-      <span className={styles.status} data-tone={status==='VERIFYING'||status==='REVIEWING'?'running':status==='VERIFIED'||status==='REVIEW COMPLETE'?'complete':status==='LOADED'?'idle':'attention'} role="status">{status}</span>
-    </header>
+    <header className={styles.hero} data-tone={view.tone}><span className={styles.heroIcon}><SummaryIcon kind={view.tone==='attention'?'issues':'verify'}/></span><div><p className={styles.eyebrow}>PULL REQUEST #{d.pr.pull_request}</p><h1 role="status">{view.title}</h1><p>{view.explanation}</p><div className={styles.heroMeta}>{d.hasReview?<><span>{countLabel(d.findings.length,'issue')} found</span><span>{countLabel(view.safeTests,'test')} ready</span><span>{countLabel(view.readyFixes,'fix')} ready</span></>:<span>{d.pr.title}</span>}</div></div><ReviewIllustration attention={view.tone==='attention'}/></header>
+    <div className={styles.summaryGrid}>{cards.map(card=><button key={card.kind} type="button" className={styles.summaryCard} data-tone={card.tone} onClick={()=>onSelect(card.section)}><span className={styles.cardLabel}><SummaryIcon kind={card.kind}/>{card.label}</span><strong>{card.value}</strong><span>{card.detail}</span></button>)}</div>
     <PipelineFlow workspace={w} data={d} onSelect={onSelect}/>
-    {d.hasReview && <><div className={styles.columns}><section className={styles.attention} aria-labelledby="attention-heading"><div className="section-heading"><h2 id="attention-heading">Needs attention</h2><span className="muted small">{actionable.length} findings</span></div>
-      {!d.findings.length?<p className="muted">No review findings returned.</p>:!top.length?<p className="muted">Existing findings have verified fix proposals. Nothing has been applied.</p>:top.map(f=><button type="button" className={styles.finding} key={f.id} onClick={()=>onSelect('findings')}>
-        <span className={`severity ${f.severity.toLowerCase()}`}>{f.severity}</span><strong>{f.title}</strong><code>{f.file}{f.line!=null?`:${f.line}`:''}</code><small>{f.source} · {f.status}</small>
-      </button>)}<button className="text-button" type="button" onClick={()=>onSelect('findings')}>View all findings →</button>
-    </section><section className={styles.context} aria-label="Supporting repository context">{d.context.length?<><RepoContextGraph files={d.pr.files.map(f=>f.filename)} context={d.context} loaded/><details><summary>{d.context.length} selected context files</summary><ul>{d.context.map(f=><li key={f.path}><code>{f.path}</code><p className="muted small">{f.reason}</p></li>)}</ul></details></>:<><h2>Repository context</h2><p className="muted">No repository context files were selected for this review.</p></>}
-      <button className="text-button" type="button" onClick={()=>onSelect('context')}>View repository context →</button></section></div>
-      {!!metrics.length && <div className={styles.metrics} aria-label="Analysis summary">{metrics.map(([value,label])=><span key={label}><strong>{value}</strong> {label}</span>)}</div>}</>}
-    <ResolutionSummary data={d} approved={safeResults.length} onSelect={onSelect}/>
+    <section className={styles.nextAction} aria-labelledby="next-heading"><div><p className={styles.eyebrow}>YOUR NEXT STEP</p><h2 id="next-heading">{view.next.title}</h2><p>{view.next.detail}</p></div><button type="button" className={view.next.label==='View verification'?'secondary-button':undefined} disabled={w.busy || !!view.next.action && !d.review && view.next.action!=='review' || view.next.action==='review' && !w.analysis} onClick={next}>{view.next.label}<span aria-hidden="true"> →</span></button></section>
+    <div className={styles.lowerGrid}>{d.hasReview && <section className={styles.attention} aria-labelledby="attention-heading"><div className="section-heading"><h2 id="attention-heading">What needs your attention</h2><button className="text-button" type="button" onClick={()=>onSelect('findings')}>View all issues →</button></div>{top.length?top.map(f=><button type="button" className={styles.finding} key={f.id} onClick={()=>onSelect('findings')}><span className={`severity ${f.severity.toLowerCase()}`}>{f.severity}</span><strong>{f.title}</strong><code>{f.file}{f.line!=null?`:${f.line}`:''}</code>{f.explanation && <small className={styles.findingMeaning}>{f.explanation.split(/\n/)[0]}</small>}<span className={styles.findingArrow} aria-hidden="true">↗</span></button>):<p className="muted">{d.findings.length?'Existing findings have verified fix proposals. Nothing has been applied.':'No review findings returned. Check review coverage before deciding to merge.'}</p>}</section>}
+    <section className={styles.prDetails} aria-labelledby="pr-details-heading"><div className="section-heading"><h2 id="pr-details-heading">About this pull request</h2><button className="text-button" type="button" onClick={()=>onSelect('files')}>View changes →</button></div><h3 className={styles.prTitle}>{d.pr.title}</h3>{d.pr.body && <details><summary>Pull request description</summary><p>{d.pr.body}</p></details>}<dl><div><dt>Author</dt><dd>{d.pr.author}</dd></div><div><dt>Repository</dt><dd><code>{d.pr.repository} #{d.pr.pull_request}</code></dd></div><div><dt>Changed files</dt><dd>{countLabel(d.pr.changed_files,'file')} <span className={styles.additions}>+{d.pr.additions}</span> <span className={styles.deletions}>−{d.pr.deletions}</span></dd></div><div><dt>Current commit</dt><dd><code title={d.pr.head_sha}>{d.pr.head_sha.slice(0,12)}</code></dd></div><div><dt>Context files</dt><dd>{d.hasReview?d.context.length:'Not reviewed yet'}</dd></div></dl>
+      <details className={styles.technical}><summary>Repository context and review details</summary><p className="mono muted small">{d.pr.head_branch} → {d.pr.base_branch}</p><p className="muted small">{countLabel(d.counts.static ?? 0,'static finding')}{d.review && ` · ${countLabel(d.review.reviewed_files.length,'file')} reviewed`}</p>{d.context.length?<><RepoContextGraph files={d.pr.files.map(f=>f.filename)} context={d.context} loaded/><ul>{d.context.map(f=><li key={f.path}><code>{f.path}</code><p className="muted small">{f.reason}</p></li>)}</ul></>:<p className="muted small">No repository context files selected.</p>}<button className="text-button" type="button" onClick={()=>onSelect('context')}>View context details →</button></details>
+    </section>
+    </div><p className={styles.safetyNote}>Proposals stay local until you decide what to do. RepoPilot does not apply changes automatically.</p>
   </div>;
 }

@@ -14,6 +14,7 @@ export type Analysis = {
   repository: string;
   pull_request: number;
   title: string;
+  body?: string | null;
   state: 'open' | 'closed';
   author: string;
   base_branch: string;

@@ -47,7 +47,7 @@ export default function HeroSection() {
             the confidence to merge — faster and safer.
           </motion.p>
           <motion.div {...enter(2)} className={styles.actions}>
-            <ActionLink href="/app">Get started<Icon name="arrow" size={16}/></ActionLink>
+            <ActionLink href="/app">Open RepoPilot<Icon name="arrow" size={16}/></ActionLink>
             <ActionLink href="#how-it-works" variant="ghost"><span className={styles.play}><Icon name="play" size={12}/></span>See how it works</ActionLink>
           </motion.div>
           <motion.ul {...enter(3)} className={styles.trust}>

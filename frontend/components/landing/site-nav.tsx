@@ -32,7 +32,7 @@ export default function SiteNav() {
           </nav>
           <div className={styles.navActions}>
             <ActionLink href={repositoryUrl} variant="ghost" size="small"><Icon name="github" size={15}/>GitHub</ActionLink>
-            <ActionLink href="/app" size="small">Open app<Icon name="arrow" size={14}/></ActionLink>
+            <ActionLink href="/app" size="small">Open RepoPilot<Icon name="arrow" size={14}/></ActionLink>
           </div>
           {scrolled && <motion.span className={styles.progress} style={{scaleX: progress}} aria-hidden="true"/>}
         </div>
