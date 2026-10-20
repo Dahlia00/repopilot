@@ -300,3 +300,6 @@ def compatibility(fix, test, sources):
     except (Unknown,ValueError,TypeError,SyntaxError,RecursionError) as e:
         return Compatibility(reason='Compatibility could not be established: '+str(e),behavior_ambiguous=False)
     return Compatibility(compatible=True,reason='Shared evidence-bound contract, test expectations and bounded static fix outcomes agree.',behavior_ambiguous=False)
+
+# Production helper, not a pytest test.
+test_cases.__test__ = False
